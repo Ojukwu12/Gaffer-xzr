@@ -1,0 +1,204 @@
+/**
+ * Market Controller
+ * Handles market-related HTTP requests
+ * @module controllers/marketController
+ */
+
+const asyncHandler = require('../middlewares/asyncHandler');
+const { success } = require('../utils/responseFormatter');
+const CustomError = require('../utils/CustomError');
+const polymarketService = require('../services/polymarketService');
+const timeframeService = require('../services/timeframeService');
+const cacheService = require('../services/cacheService');
+const logger = require('../config/logger');
+
+/**
+ * Get all markets
+ * GET /api/markets
+ */
+const getMarkets = asyncHandler(async (req, res) => {
+  const { category, timeframe, status, limit = 50, offset = 0 } = req.query;
+  
+  logger.info('Fetching markets', { category, timeframe, status, limit, offset });
+  
+  // Check cache first
+  const cacheKey = `all:${category || 'all'}:${timeframe || 'all'}:${status || 'all'}:${limit}:${offset}`;
+  const cached = cacheService.getCachedMarketList(cacheKey);
+  
+  if (cached) {
+    logger.info('Returning cached market list');
+    return success(res, cached, 'Markets retrieved from cache');
+  }
+  
+  // Fetch markets from Polymarket
+  const filters = {
+    ...(category && { category }),
+    ...(status && { closed: status === 'closed' })
+  };
+  
+  let markets = await polymarketService.fetchMarkets(filters);
+  
+  // Parse markets
+  markets = markets.map(m => polymarketService.parseMarket(m));
+  
+  // Filter by timeframe if specified
+  if (timeframe && timeframeService.isValidTimeframe(timeframe)) {
+    markets = timeframeService.filterMarketsByTimeframe(markets, timeframe);
+  }
+  
+  // Apply pagination
+  const total = markets.length;
+  markets = markets.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+  
+  // Enrich with timeframe information
+  markets = markets.map(m => ({
+    ...m,
+    availableTimeframes: timeframeService.getAvailableTimeframes(m),
+    optimalTimeframe: timeframeService.getOptimalTimeframe(m)
+  }));
+  
+  // Cache the result
+  cacheService.cacheMarketList(cacheKey, markets, 300);
+  
+  return success(res, {
+    markets,
+    pagination: {
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      total
+    }
+  });
+});
+
+/**
+ * Get single market by ID
+ * GET /api/markets/:id
+ */
+const getMarketById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  logger.info(`Fetching market: ${id}`);
+  
+  // Check cache first
+  let marketData = cacheService.getCachedMarket(id);
+  
+  if (!marketData) {
+    // Fetch from Polymarket
+    const rawMarket = await polymarketService.fetchMarketById(id);
+    marketData = polymarketService.parseMarket(rawMarket);
+    
+    // Cache it
+    cacheService.cacheMarket(id, marketData, 600);
+  }
+  
+  // Enrich with timeframe data
+  const enrichedMarket = timeframeService.enrichMarketWithTimeframes(marketData);
+  
+  // Check for cached predictions
+  const predictions = {};
+  for (const option of enrichedMarket.options || []) {
+    for (const timeframe of enrichedMarket.timeframes.available) {
+      const cached = await cacheService.getPrediction(id, option, timeframe);
+      if (cached) {
+        if (!predictions[option]) predictions[option] = {};
+        predictions[option][timeframe] = {
+          confidence: cached.confidence,
+          reason: cached.reason,
+          timestamp: cached.timestamp
+        };
+      }
+    }
+  }
+  
+  return success(res, {
+    ...enrichedMarket,
+    cachedPredictions: predictions
+  });
+});
+
+/**
+ * Search markets
+ * GET /api/markets/search
+ */
+const searchMarkets = asyncHandler(async (req, res) => {
+  const { q, limit = 20 } = req.query;
+  
+  if (!q || q.trim().length < 2) {
+    throw new CustomError('Search query must be at least 2 characters', 400, 'INVALID_QUERY');
+  }
+  
+  logger.info(`Searching markets: ${q}`);
+  
+  let markets = await polymarketService.searchMarkets(q);
+  
+  // Parse and limit results
+  markets = markets
+    .map(m => polymarketService.parseMarket(m))
+    .slice(0, parseInt(limit));
+  
+  return success(res, { markets, query: q });
+});
+
+/**
+ * Get markets by category
+ * GET /api/markets/category/:category
+ */
+const getMarketsByCategory = asyncHandler(async (req, res) => {
+  const { category } = req.params;
+  const { limit = 50 } = req.query;
+  
+  logger.info(`Fetching markets for category: ${category}`);
+  
+  // Check cache
+  const cacheKey = `category:${category}:${limit}`;
+  const cached = cacheService.getCachedMarketList(cacheKey);
+  
+  if (cached) {
+    return success(res, cached);
+  }
+  
+  let markets = await polymarketService.fetchMarketsByCategory(category);
+  
+  markets = markets
+    .map(m => polymarketService.parseMarket(m))
+    .slice(0, parseInt(limit));
+  
+  // Cache result
+  cacheService.cacheMarketList(cacheKey, markets, 300);
+  
+  return success(res, { markets, category });
+});
+
+/**
+ * Get trending markets
+ * GET /api/markets/trending
+ */
+const getTrendingMarkets = asyncHandler(async (req, res) => {
+  const { limit = 10 } = req.query;
+  
+  logger.info('Fetching trending markets');
+  
+  // Check cache
+  const cached = cacheService.getCachedMarketList('trending');
+  
+  if (cached) {
+    return success(res, cached);
+  }
+  
+  let markets = await polymarketService.fetchTrendingMarkets(parseInt(limit));
+  
+  markets = markets.map(m => polymarketService.parseMarket(m));
+  
+  // Cache result
+  cacheService.cacheMarketList('trending', markets, 180); // 3 minutes
+  
+  return success(res, { markets });
+});
+
+module.exports = {
+  getMarkets,
+  getMarketById,
+  searchMarkets,
+  getMarketsByCategory,
+  getTrendingMarkets
+};

@@ -1,0 +1,21 @@
+node_modules/
+.env
+*.log
+.DS_Store
+coverage/
+dist/
+build/
+.vscode/
+vapid-keys.txt
+*.key
+*.pem
+backups/
+
+# Documentation files (keep only essential ones)
+PRODUCTION-READY.md
+IMPROVEMENTS.md
+FINAL-CHECKLIST.md
+EMAIL-VAPID-CONFIRMATION.md
+DEPLOYMENT.md
+docs/VAPID-AND-EMAILS.md
+docs/EMAIL-TEMPLATES.md

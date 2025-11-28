@@ -1,0 +1,188 @@
+/**
+ * Web Push Service
+ * Handles Web Push notifications
+ * @module services/webPushService
+ */
+
+const webpush = require('web-push');
+const logger = require('../config/logger');
+const config = require('../config/env');
+const CustomError = require('../utils/CustomError');
+
+/**
+ * Initialize Web Push with VAPID keys
+ */
+const initializeWebPush = () => {
+  if (!config.webPush.vapidPublic || !config.webPush.vapidPrivate) {
+    logger.warn('Web Push VAPID keys not configured');
+    return false;
+  }
+  
+  const subject = config.webPush.subject && config.webPush.subject.trim().length > 0
+    ? config.webPush.subject
+    : ('mailto:' + config.email.from);
+
+  webpush.setVapidDetails(
+    subject,
+    config.webPush.vapidPublic,
+    config.webPush.vapidPrivate
+  );
+  
+  logger.info('Web Push initialized');
+  return true;
+};
+
+/**
+ * Sends a push notification
+ * @param {Object} subscription - Push subscription object
+ * @param {Object} payload - Notification payload
+ * @returns {Promise<Object>}
+ */
+const sendPushNotification = async (subscription, payload) => {
+  if (!initializeWebPush()) {
+    throw new CustomError('Web Push not configured', 500, 'WEBPUSH_NOT_CONFIGURED');
+  }
+  
+  const pushSubscription = {
+    endpoint: subscription.endpoint,
+    keys: {
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth
+    }
+  };
+  
+  const payloadString = JSON.stringify(payload);
+  
+  logger.info(`Sending push notification to ${subscription.endpoint.substring(0, 50)}...`);
+  
+  const result = await webpush.sendNotification(pushSubscription, payloadString);
+  
+  logger.info('Push notification sent successfully');
+  
+  return result;
+};
+
+/**
+ * Sends prediction alert via push
+ * @param {Object} subscription - Push subscription object
+ * @param {Object} prediction - Prediction data
+ * @param {Object} market - Market data
+ * @returns {Promise<Object>}
+ */
+const sendPredictionPush = async (subscription, prediction, market) => {
+  const payload = {
+    title: '🎯 Polyscope Alert',
+    body: `${market.title}: ${prediction.confidence}% confidence for ${prediction.option}`,
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: `prediction-${market.marketId}`,
+    data: {
+      marketId: market.marketId,
+      option: prediction.option,
+      confidence: prediction.confidence,
+      reason: prediction.reason,
+      timeframe: prediction.timeframe,
+      url: `https://polymarket.com/market/${market.marketId}`
+    },
+    actions: [
+      {
+        action: 'view',
+        title: 'View Details'
+      },
+      {
+        action: 'dismiss',
+        title: 'Dismiss'
+      }
+    ],
+    requireInteraction: false,
+    timestamp: Date.now()
+  };
+  
+  return sendPushNotification(subscription, payload);
+};
+
+/**
+ * Sends a test push notification
+ * @param {Object} subscription - Push subscription object
+ * @returns {Promise<Object>}
+ */
+const sendTestPush = async (subscription) => {
+  const payload = {
+    title: '🎯 Polyscope Test',
+    body: 'Your push notifications are working correctly!',
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: 'test',
+    timestamp: Date.now()
+  };
+  
+  return sendPushNotification(subscription, payload);
+};
+
+/**
+ * Sends market alert push notification
+ * @param {Object} subscription - Push subscription object
+ * @param {string} message - Alert message
+ * @param {Object} data - Additional data
+ * @returns {Promise<Object>}
+ */
+const sendMarketAlertPush = async (subscription, message, data = {}) => {
+  const payload = {
+    title: '📊 Market Alert',
+    body: message,
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: 'market-alert',
+    data: {
+      ...data,
+      timestamp: Date.now()
+    },
+    timestamp: Date.now()
+  };
+  
+  return sendPushNotification(subscription, payload);
+};
+
+/**
+ * Validates push subscription object
+ * @param {Object} subscription - Subscription to validate
+ * @returns {boolean}
+ */
+const validateSubscription = (subscription) => {
+  if (!subscription || !subscription.endpoint) {
+    return false;
+  }
+  
+  if (!subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+    return false;
+  }
+  
+  return true;
+};
+
+/**
+ * Tests if Web Push is properly configured
+ * @returns {boolean}
+ */
+const isConfigured = () => {
+  return !!(config.webPush.vapidPublic && config.webPush.vapidPrivate);
+};
+
+/**
+ * Gets VAPID public key
+ * @returns {string|null}
+ */
+const getVapidPublicKey = () => {
+  return config.webPush.vapidPublic || null;
+};
+
+module.exports = {
+  sendPushNotification,
+  sendPredictionPush,
+  sendTestPush,
+  sendMarketAlertPush,
+  validateSubscription,
+  isConfigured,
+  getVapidPublicKey,
+  initializeWebPush
+};
