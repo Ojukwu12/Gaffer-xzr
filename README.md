@@ -1,6 +1,15 @@
 # Polyscope
 
-Production-grade backend for predicting Polymarket outcomes using AI-powered analysis.
+Production-grade backend for predicting Polymarket outcomes using AI-powered analysis with 50+ advanced features, comprehensive testing, and CI/CD pipeline.
+
+## ✨ Key Features
+
+- **50+ Prediction Features**: Market validation, liquidity analysis, anomaly detection, risk scoring
+- **AI-Powered Insights**: Google Gemini 2.5 Flash with strict validation
+- **Production Ready**: Full test suite, CI/CD pipeline, monitoring setup
+- **Security Hardened**: Rate limiting, CORS, input validation, authentication
+- **Well Documented**: 10+ comprehensive guides and API documentation
+- **Frontend Ready**: CORS configured with React/Vue/Angular examples
 
 ## 🚀 Quick Start
 
@@ -42,16 +51,53 @@ npm start
 
 # Development mode (with auto-reload)
 npm run dev
+
+# Run tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Check code quality
+npm run lint
 ```
 
 Server will start on `http://localhost:3000`
 
-### Manual Tasks
+## 🧪 Testing
+
+The project includes a comprehensive test suite:
 
 ```bash
-# Compute predictions for all active markets
-npm run refresh
+# Run all tests with coverage
+npm test
+
+# Run only unit tests
+npm run test:unit
+
+# Run only integration tests
+npm run test:integration
+
+# View coverage report
+open coverage/lcov-report/index.html
 ```
+
+**Coverage Target**: 70%+ across all metrics
+**Test Files**: 70+ tests across unit, integration, and API tests
+
+See [TESTING_GUIDE.md](TESTING_GUIDE.md) for detailed testing documentation.
+
+## 🔄 CI/CD Pipeline
+
+Automated testing and deployment via GitHub Actions:
+
+- ✅ Automated testing on push/PR
+- ✅ Code linting and quality checks
+- ✅ Security vulnerability scanning
+- ✅ Docker image building
+- ✅ Coverage reporting
+
+See [.github/workflows/ci.yml](.github/workflows/ci.yml) for pipeline configuration.
 
 ## 📁 Project Structure
 
@@ -71,24 +117,39 @@ index.js           # Server entry point
 
 ## 🔑 Key Features
 
-### Core Functionality
-- **40+ Computed Features**: Liquidity, volume, whale metrics, trends, sentiment, risk scores
-- **LLM-Powered Predictions**: Uses Google Gemini Pro for intelligent analysis
-- **Whale Factor Analysis**: Tracks large trader behavior and smart money flow
-- **Timeframe Support**: Daily, weekly, and monthly predictions
+### Core Prediction Engine (50+ Features)
+- **Market Validation**: 7 comprehensive checks for data quality
+- **Liquidity Analysis**: Total, per-option, health classification
+- **Volume Metrics**: 24h tracking, concentration analysis
+- **Price Distribution**: Spread, consensus, imbalance detection
+- **Trend Analysis**: Multi-period momentum, RSI-like indicators
+- **Sentiment Analysis**: Tag-based, description parsing
+- **Trading Activity**: Frequency, participation, velocity
+- **Whale Activity**: Large position detection, smart money tracking
+- **Market Depth**: Order book analysis, liquidity distribution
+- **Timing Factors**: Urgency scoring, lifecycle stages
+- **Risk Analysis**: 6-factor comprehensive risk assessment
+- **Anomaly Detection**: 8 types of market anomalies
 
-### Communication
-- **5 Professional Email Templates**: Prediction alerts, high confidence, daily digest, welcome, confirmation
-- **Web Push Notifications**: Real-time browser notifications with custom payloads
-- **Webhook System**: External integrations with HMAC signatures and retry logic
+### LLM Integration
+- **Google Gemini 2.5 Flash**: Advanced AI-powered predictions
+- **Strict System Prompt**: Validated, structured output format
+- **Confidence Scoring**: 0-100 confidence levels
+- **Key Factors**: Reasoning and risk identification
+- **Error Handling**: Comprehensive retry logic
 
-### Production Ready
-- **Caching System**: Hybrid in-memory + MongoDB caching
-- **Rate Limiting**: Configurable with dev IP bypass
-- **Authentication**: API key + role-based access control
-- **Security**: Input sanitization, XSS protection, request timeouts
-- **Monitoring**: Prometheus-compatible metrics endpoint
-- **Docker Support**: Complete docker-compose.yml with MongoDB + Redis
+### Communication & Notifications
+- **5 Email Templates**: Prediction alerts, digests, confirmations
+- **Web Push Notifications**: Real-time browser notifications
+- **Webhook System**: External integrations with HMAC signatures
+
+### Production Features
+- **Caching System**: Hybrid in-memory + MongoDB
+- **Rate Limiting**: General (100/15min) + Prediction (20/15min)
+- **Authentication**: JWT-based with role-based access
+- **Security**: CORS, Helmet, input validation, request timeouts
+- **Monitoring**: Metrics endpoint, Winston logging
+- **Docker Support**: Complete containerization with compose
 - **Automated Backups**: MongoDB backup script with 7-day retention
 
 ## 📧 Email Templates
@@ -131,9 +192,20 @@ See `docs/EMAIL-TEMPLATES.md` and `docs/VAPID-AND-EMAILS.md` for details.
 ### Health
 - `GET /health` - System health check
 
-## 📖 Full Documentation
+## 📖 Documentation
 
-See `/src/docs/api-contract.md` for complete API documentation with examples.
+Comprehensive documentation is available:
+
+- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete API reference with examples
+- **[FEATURES.md](FEATURES.md)** - Detailed feature documentation (50+ features)
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testing infrastructure and best practices
+- **[MONITORING_SETUP.md](MONITORING_SETUP.md)** - Production monitoring setup
+- **[FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)** - React/Vue/Angular examples
+- **[QUICK_START.md](QUICK_START.md)** - Getting started guide
+- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-deployment tasks
+- **[PRODUCTION_READINESS.md](PRODUCTION_READINESS.md)** - Full production readiness report
+- **[COMMANDS_REFERENCE.md](COMMANDS_REFERENCE.md)** - Quick command reference
+- **[GIT_PUSH_GUIDE.md](GIT_PUSH_GUIDE.md)** - Branch strategy and workflow
 
 ## ⚙️ Configuration
 

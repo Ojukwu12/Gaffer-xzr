@@ -7,6 +7,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const { corsOptions } = require('./config/cors');
 const cron = require('node-cron');
 const { connectDB } = require('./config/db');
 const logger = require('./config/logger');
@@ -36,7 +37,7 @@ global.lastCronRun = null;
  * Middleware setup
  */
 app.use(helmet()); // Security headers
-app.use(cors()); // Enable CORS
+app.use(cors(corsOptions)); // Enable CORS with configuration
 app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies
 
