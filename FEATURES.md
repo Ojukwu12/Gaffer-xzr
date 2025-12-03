@@ -1,8 +1,6 @@
-# Enhanced Polymarket Prediction Engine - Features
+This feature reference has been consolidated into `docs/FEATURES.md`.
 
-## Overview
-The Polymarket Prediction Engine has been significantly enhanced with 50+ features, advanced validation, and improved user experience capabilities.
-
+See `docs/FEATURES.md` for the full feature list and examples.
 ## New System Prompt Features
 
 ### 1. Data Validation Rules

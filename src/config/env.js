@@ -60,9 +60,19 @@ const config = {
 const validateConfig = () => {
   const required = ['MONGODB_URI', 'LLM_API_KEY'];
   const missing = required.filter(key => !process.env[key]);
-  
-  if (missing.length > 0 && config.nodeEnv === 'production') {
-    console.warn(`Warning: Missing environment variables: ${missing.join(', ')}`);
+
+  if (missing.length > 0) {
+    const msg = `Missing required environment variables: ${missing.join(', ')}`;
+    if (config.nodeEnv === 'production') {
+      // In production we should fail fast to avoid running with invalid configuration
+      // Throwing will surface the error during startup and prevent the server from running.
+      throw new Error(msg);
+    }
+
+    // In non-production environments, warn so developers can still run locally.
+    // This helps CI/dev where some secrets may be intentionally absent.
+    // eslint-disable-next-line no-console
+    console.warn(`Warning: ${msg}`);
   }
 };
 

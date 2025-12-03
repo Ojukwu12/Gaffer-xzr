@@ -632,3 +632,135 @@ module.exports = {
   generateMarketSummary,
   validateMarketData
 };
+
+// --- Backwards-compatible helper API expected by older tests/clients ---
+/**
+ * Validate market (compat wrapper)
+ * Returns { isValid, errors, warnings, score }
+ */
+const validateMarket = (market) => {
+  if (!market || typeof market !== 'object') {
+    return { isValid: false, errors: ['Invalid market object'], warnings: [], score: 0 };
+  }
+
+  const errors = [];
+  const warnings = [];
+
+  if (!market.id && !market.marketId) errors.push('Missing id');
+  if (!market.question && !market.title) errors.push('Missing question/title');
+  if (!market.options || !Array.isArray(market.options) || market.options.length === 0) errors.push('No options');
+
+  const liquidity = (typeof market.liquidity !== 'undefined') ? market.liquidity : (market.liquidity_24h || market.totalLiquidity || 0);
+  const volume = market.volume_24h || market.volume24h || market.volume || 0;
+
+  if (liquidity > 0 && liquidity < 10000) warnings.push('Low liquidity');
+  if (volume > 0 && volume < 100) warnings.push('Low volume');
+  if (market.options && market.options.length === 1) warnings.push('Single option market - limited information');
+
+  const score = Math.round(Math.min(100, (liquidity / 10000) * 30 + (volume / 10000) * 30 + (market.options?.length || 1) * 5 + 20));
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings,
+    score
+  };
+};
+
+const calculateLiquidityMetrics = (market) => {
+  const totalLiquidity = (typeof market.liquidity !== 'undefined') ? market.liquidity : (market.totalLiquidity || (market.options || []).reduce((s, o) => s + (o.liquidity || 0), 0) || 0);
+  const optionCount = (market.options || []).length || 1;
+  const avgLiquidityPerOption = Math.floor(totalLiquidity / optionCount);
+  const volume = market.volume_24h || market.volume24h || market.volume || 0;
+  const volumeToLiquidityRatio = totalLiquidity > 0 ? volume / totalLiquidity : 0;
+  const liquidityScore = Math.round(Math.min(100, (totalLiquidity / 100000) * 100));
+  const liquidityHealth = totalLiquidity === 0 ? 'critical' : liquidityScore > 70 ? 'healthy' : liquidityScore > 40 ? 'fair' : 'poor';
+
+  return {
+    totalLiquidity,
+    avgLiquidityPerOption,
+    liquidityScore,
+    volumeToLiquidityRatio,
+    liquidityHealth
+  };
+};
+
+const calculateVolumeMetrics = (market) => {
+  const totalVolume24h = market.volume_24h || market.volume24h || market.volume || (market.options || []).reduce((s, o) => s + (o.volume_24h || o.volume || 0), 0) || 0;
+  const optionCount = (market.options || []).length || 1;
+  const avgVolumePerOption = Math.floor(totalVolume24h / optionCount);
+  const volumeScore = Math.round(Math.min(100, (totalVolume24h / 100000) * 100));
+  const volumeConcentration = optionCount > 0 ? Math.max(...(market.options || []).map(o => (o.volume_24h || o.volume || 0))) / Math.max(1, totalVolume24h) : 0;
+
+  return {
+    totalVolume24h,
+    avgVolumePerOption,
+    volumeScore,
+    volumeConcentration
+  };
+};
+
+const calculatePriceDistribution = (market) => {
+  const optionPrices = (market.options || []).map(o => o.price ?? o.lastPrice ?? 0);
+  const priceSpreadRaw = optionPrices.length > 1 ? Math.max(...optionPrices) - Math.min(...optionPrices) : 0;
+  const priceSpread = parseFloat(priceSpreadRaw.toFixed(3));
+  const avg = optionPrices.reduce((s, v) => s + (v || 0), 0) / Math.max(1, optionPrices.length);
+  const priceImbalance = optionPrices.reduce((s, v) => s + Math.abs((v || 0) - avg), 0);
+  const marketConsensus = optionPrices.map((p, i) => ({ option: market.options?.[i]?.name || `opt${i}`, price: p }));
+
+  return {
+    priceSpread,
+    priceImbalance,
+    optionPrices,
+    marketConsensus
+  };
+};
+
+const detectAnomaliesSimple = (market) => {
+  const anomalies = [];
+  const liquidity = market.liquidity || 0;
+  if (liquidity > 0 && liquidity < 1000) anomalies.push({ type: 'low_liquidity', message: 'Liquidity below threshold' });
+
+  // Price sum anomaly (binary markets sum should be ~1)
+  if (Array.isArray(market.options) && market.options.length > 0) {
+    const sum = market.options.reduce((s, o) => s + (o.price || 0), 0);
+    if (Math.abs(sum - 1) > 0.05) anomalies.push({ type: 'price_sum_anomaly', message: `Option prices sum to ${sum}` });
+  }
+
+  return anomalies;
+};
+
+const calculateMarketScore = (market) => {
+  const liquidity = market.liquidity || 0;
+  const volume = market.volume_24h || market.volume24h || market.volume || 0;
+  const base = 20;
+  const liquidityScore = Math.min(50, Math.floor(liquidity / 10000));
+  const volumeScore = Math.min(30, Math.floor(volume / 10000));
+  const score = Math.min(100, base + liquidityScore + volumeScore + ((market.options?.length || 1) * 5));
+  return score;
+};
+
+const generateMarketSummaryCompat = (market, { liquidityMetrics = {}, volumeMetrics = {} } = {}) => {
+  return {
+    quality: {
+      score: calculateMarketScore(market),
+      liquidity: liquidityMetrics,
+      volume: volumeMetrics
+    },
+    activity: {
+      recentVolume: volumeMetrics.totalVolume24h || 0,
+      avgTradeSize: Math.round((volumeMetrics.totalVolume24h || 0) / Math.max(1, (market.options || []).length))
+    },
+    risks: [],
+    opportunities: []
+  };
+};
+
+// Export compatibility functions
+module.exports.validateMarket = validateMarket;
+module.exports.calculateLiquidityMetrics = calculateLiquidityMetrics;
+module.exports.calculateVolumeMetrics = calculateVolumeMetrics;
+module.exports.calculatePriceDistribution = calculatePriceDistribution;
+module.exports.detectAnomalies = detectAnomaliesSimple;
+module.exports.generateMarketSummary = generateMarketSummaryCompat;
+module.exports.calculateMarketScore = calculateMarketScore;

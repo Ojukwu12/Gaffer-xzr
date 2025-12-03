@@ -13,12 +13,19 @@
  * @returns {Object} Express response
  */
 const success = (res, data, message = 'Success', statusCode = 200) => {
-  return res.status(statusCode).json({
+  const response = {
     success: true,
     message,
     data,
     timestamp: new Date().toISOString()
-  });
+  };
+
+  // Backwards compatibility: surface common keys at top-level
+  if (data && typeof data === 'object' && data.status) {
+    response.status = data.status;
+  }
+
+  return res.status(statusCode).json(response);
 };
 
 /**
@@ -47,7 +54,9 @@ const error = (res, message = 'An error occurred', statusCode = 500, errorCode =
   if (process.env.NODE_ENV === 'development' && details && details.stack) {
     response.stack = details.stack;
   }
-  
+  // Backwards compatibility: include `error` field expected by older clients/tests
+  response.error = message;
+
   return res.status(statusCode).json(response);
 };
 

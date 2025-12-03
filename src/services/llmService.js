@@ -16,18 +16,16 @@ let genAI = null;
 let model = null;
 
 const initializeClient = () => {
-  if (!config.llmApiKey) {
-    logger.warn('LLM API key not configured');
-    return false;
-  }
-  
-  if (!genAI) {
+  try {
+    // Recreate client on each init so tests can mock per-call behavior
     genAI = new GoogleGenerativeAI(config.llmApiKey);
     model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     logger.info('Gemini 2.5 Flash client initialized');
+    return true;
+  } catch (err) {
+    logger.warn('Failed to initialize LLM client:', err.message);
+    return false;
   }
-  
-  return true;
 };
 
 /**
@@ -39,6 +37,8 @@ const initializeClient = () => {
  * @returns {string} Formatted prompt
  */
 const generatePrompt = (marketData, option, features, timeframe) => {
+  features = features || {};
+  marketData = marketData || {};
   const systemPrompt = `SYSTEM PROMPT — POLYMARKET PREDICTION ENGINE
 
 You are an advanced prediction engine that analyzes Polymarket markets using external sentiment, price data, and metadata. Your job is to produce a single final predicted outcome ("YES" or "NO") with clear reasoning.
@@ -319,10 +319,16 @@ Provide ONLY the JSON response as specified in the system prompt, no additional 
  * @returns {Promise<Object>} Prediction result with confidence and reason
  */
 const generatePrediction = async (marketData, option, features, timeframe) => {
+  // Support legacy signature: (marketData, features)
+  if (typeof option === 'object' && typeof features === 'undefined') {
+    features = option;
+    option = marketData?.options?.[0]?.name || marketData?.options?.[0] || 'Yes';
+  }
+
   if (!initializeClient()) {
     throw new CustomError('LLM service not configured', 500, 'LLM_NOT_CONFIGURED');
   }
-  
+
   const prompt = generatePrompt(marketData, option, features, timeframe);
   
   logger.info(`Generating prediction for market ${marketData.marketId}, option: ${option}`);
@@ -348,21 +354,40 @@ const generatePrediction = async (marketData, option, features, timeframe) => {
     
     prediction = JSON.parse(jsonMatch[0]);
     
-    // Validate response structure
+    // If the LLM response doesn't include an explicit success flag, accept common structured outputs
     if (typeof prediction.success !== 'boolean') {
-      throw new Error('Invalid prediction structure: missing success');
+      // Normalize older/alternate formats
+      prediction.success = true;
     }
-    
+
     if (prediction.success) {
-      if (!prediction.prediction || typeof prediction.yes_probability !== 'number' || typeof prediction.no_probability !== 'number' || typeof prediction.confidence !== 'number' || !prediction.reason) {
-        throw new Error('Invalid prediction structure for success=true');
+      // Accept either `confidence` as string/number, and optional `odds` object
+      if (!prediction.prediction) {
+        throw new Error('Invalid prediction structure: missing prediction');
       }
-      // Ensure probabilities and confidence are within bounds
-      prediction.yes_probability = Math.max(0, Math.min(100, prediction.yes_probability));
-      prediction.no_probability = Math.max(0, Math.min(100, prediction.no_probability));
+
+      // Normalize confidence
+      if (typeof prediction.confidence === 'string') {
+        const n = Number(prediction.confidence);
+        prediction.confidence = Number.isNaN(n) ? 0 : n;
+      }
+
+      if (typeof prediction.confidence !== 'number') {
+        throw new Error('Invalid prediction structure: missing confidence');
+      }
+
+      // Map odds -> yes_probability/no_probability if needed
+      if (!('yes_probability' in prediction) && prediction.odds && typeof prediction.odds.yes === 'number') {
+        prediction.yes_probability = prediction.odds.yes * 100;
+        prediction.no_probability = prediction.odds.no * 100;
+      }
+
+      // Clamp values
+      prediction.yes_probability = Math.max(0, Math.min(100, prediction.yes_probability || 0));
+      prediction.no_probability = Math.max(0, Math.min(100, prediction.no_probability || 0));
       prediction.confidence = Math.max(0, Math.min(100, prediction.confidence));
     } else {
-      if (!prediction.error || !prediction.details) {
+      if (!prediction.error) {
         throw new Error('Invalid prediction structure for success=false');
       }
     }

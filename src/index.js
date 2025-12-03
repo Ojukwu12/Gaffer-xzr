@@ -23,6 +23,7 @@ const marketRoutes = require('./routes/marketRoutes');
 const predictionRoutes = require('./routes/predictionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const predictionsCompatRoutes = require('./routes/predictionsCompatRoutes');
 
 // Initialize Express app
 const app = express();
@@ -108,6 +109,8 @@ app.use('/api/markets', predictionRoutes); // Prediction routes nested under mar
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/metrics', require('./routes/metricsRoutes'));
+// Back-compat route mounting for clients/tests expecting /api/predictions
+app.use('/api/predictions', predictionsCompatRoutes);
 
 /**
  * Root endpoint
