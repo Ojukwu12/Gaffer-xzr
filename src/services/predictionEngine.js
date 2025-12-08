@@ -286,6 +286,9 @@ const computeFeatures = async (marketData, option, timeframe) => {
     (features.volume24h / Math.max(1, features.liquidity)) * 0.1
   );
   
+  // Anomaly detection (must be calculated before using in quality score)
+  features.anomalyScore = detectAnomalies(features, marketData);
+  
   features.riskScore = (
     features.priceVolatility * 0.25 +
     features.liquidityRisk * 0.25 +
@@ -303,7 +306,7 @@ const computeFeatures = async (marketData, option, timeframe) => {
     (1 - features.riskScore) * 30 +
     features.liquidityScore * 25 +
     features.marketEfficiency * 25 +
-    (1 - Math.min(1, features.anomalyScore)) * 20
+    (1 - Math.min(1, features.anomalyScore || 0)) * 20
   );
   features.marketQualityGrade = features.marketQualityScore > 85 ? 'A' :
                                  features.marketQualityScore > 70 ? 'B' :
@@ -341,9 +344,6 @@ const computeFeatures = async (marketData, option, timeframe) => {
     features.isLeadingOption = true;
     features.competitiveness = 1;
   }
-  
-  // Anomaly detection
-  features.anomalyScore = detectAnomalies(features, marketData);
   
   // Timeframe-specific features
   const timeframeFeatures = timeframeService.calculateTimeframeFeatures(marketData, timeframe);
