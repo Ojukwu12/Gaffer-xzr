@@ -483,7 +483,7 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   // Compute all features
   const features = await computeFeatures(marketData, option, timeframe);
   
-  // Generate LLM prediction
+  // Generate LLM prediction - returns a single YES/NO answer
   const llmResult = await llmService.generatePrediction(
     marketData,
     option,
@@ -495,21 +495,17 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     throw new CustomError(llmResult.error, 400, 'INVALID_MARKET_DATA', { details: llmResult.details });
   }
 
-  // For binary markets, map YES/NO to Yes/No and adjust confidence based on option
-  const predictedOption = llmResult.prediction === 'YES' ? 'Yes' : 'No';
-  const isPredictedOption = predictedOption === option;
-  const confidence = isPredictedOption ? llmResult.confidence : (100 - llmResult.confidence);
-  
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, option);
   
-  // Construct final prediction object
+  // Construct final prediction object with the main answer (YES/NO)
   const prediction = {
-    confidence,
-    reason: llmResult.reason,
-    notes: llmResult.notes,
+    answer: llmResult.prediction, // Main answer: YES or NO
+    confidence: llmResult.confidence,
     yes_probability: llmResult.yes_probability,
     no_probability: llmResult.no_probability,
+    reason: llmResult.reason,
+    notes: llmResult.notes,
     features,
     summary: marketSummary
   };
@@ -527,7 +523,7 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     totalTime
   );
   
-  logger.info(`Prediction generated in ${totalTime}ms, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+  logger.info(`Prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
   
   return {
     ...prediction,
@@ -536,6 +532,90 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     timeframe,
     timestamp: new Date().toISOString(),
     fromCache: false,
+    computationTime: totalTime
+  };
+};
+
+/**
+ * Generates a unified single prediction for a market (YES/NO answer only)
+ * @param {string} marketId - Market ID
+ * @param {string} timeframe - Prediction timeframe
+ * @returns {Promise<Object>} Unified prediction with single YES/NO answer
+ */
+const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
+  logger.info(`Generating unified prediction for market: ${marketId}, timeframe: ${timeframe}`);
+  
+  const overallStart = Date.now();
+  
+  // Validate timeframe
+  if (!timeframeService.isValidTimeframe(timeframe)) {
+    throw new CustomError(
+      `Invalid timeframe: ${timeframe}`,
+      400,
+      'INVALID_TIMEFRAME'
+    );
+  }
+  
+  // Fetch market data
+  let marketData = cacheService.getCachedMarket(marketId);
+  
+  if (!marketData) {
+    marketData = await polymarketService.fetchMarketById(marketId);
+    marketData = polymarketService.parseMarket(marketData);
+    cacheService.cacheMarket(marketId, marketData, 300);
+  }
+  
+  // Check timeframe availability
+  const availableTimeframes = timeframeService.getAvailableTimeframes(marketData);
+  if (!availableTimeframes.includes(timeframe)) {
+    throw new CustomError(
+      `Timeframe ${timeframe} not available for this market. Available: ${availableTimeframes.join(', ')}`,
+      400,
+      'TIMEFRAME_NOT_AVAILABLE'
+    );
+  }
+  
+  // For binary markets, use 'Yes' as the representative option for feature computation
+  const representativeOption = 'Yes';
+  
+  // Compute all features
+  const features = await computeFeatures(marketData, representativeOption, timeframe);
+  
+  // Generate LLM prediction - returns a single YES/NO answer
+  const llmResult = await llmService.generatePrediction(
+    marketData,
+    representativeOption,
+    features,
+    timeframe
+  );
+
+  if (!llmResult.success) {
+    throw new CustomError(llmResult.error, 400, 'INVALID_MARKET_DATA', { details: llmResult.details });
+  }
+
+  // Generate market summary
+  const marketSummary = generateMarketSummary(features, marketData, representativeOption);
+  
+  // Construct final unified prediction object
+  const prediction = {
+    answer: llmResult.prediction, // Main answer: YES or NO
+    confidence: llmResult.confidence,
+    yes_probability: llmResult.yes_probability,
+    no_probability: llmResult.no_probability,
+    reason: llmResult.reason,
+    notes: llmResult.notes,
+    summary: marketSummary
+  };
+  
+  const totalTime = Date.now() - overallStart;
+  
+  logger.info(`Unified prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+  
+  return {
+    ...prediction,
+    marketId,
+    timeframe,
+    timestamp: new Date().toISOString(),
     computationTime: totalTime
   };
 };
@@ -626,6 +706,7 @@ const generateMarketSummary = (features, marketData, option) => {
 
 module.exports = {
   generatePrediction,
+  generateUnifiedPrediction,
   generateAllOptionsPredictions,
   computeFeatures,
   detectAnomalies,

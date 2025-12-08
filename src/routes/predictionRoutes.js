@@ -14,6 +14,18 @@ const { predictionLimiter } = require('../middlewares/rateLimit');
 router.use(predictionLimiter);
 
 /**
+ * GET /api/markets/:id/predict-unified
+ * Generate unified prediction (single YES/NO answer) for a market
+ */
+router.get('/:id/predict-unified',
+  [
+    param('id').notEmpty().withMessage('Market ID is required').trim(),
+    query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
+  ],
+  predictionController.getUnifiedPrediction
+);
+
+/**
  * GET /api/markets/:id/predict
  * Generate prediction for a specific option
  */

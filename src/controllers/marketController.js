@@ -13,6 +13,22 @@ const cacheService = require('../services/cacheService');
 const logger = require('../config/logger');
 
 /**
+ * Filters out expired markets
+ * @param {Array} markets - Array of market objects
+ * @returns {Array} Filtered markets with non-expired only
+ */
+const filterExpiredMarkets = (markets) => {
+  const now = new Date();
+  return markets.filter(market => {
+    if (!market.endDate) {
+      return true; // Keep markets without end date
+    }
+    const endDate = new Date(market.endDate);
+    return endDate > now; // Only keep markets that haven't expired
+  });
+};
+
+/**
  * Get all markets
  * GET /api/markets
  */
@@ -40,6 +56,9 @@ const getMarkets = asyncHandler(async (req, res) => {
   
   // Parse markets
   markets = markets.map(m => polymarketService.parseMarket(m));
+  
+  // Filter out expired markets
+  markets = filterExpiredMarkets(markets);
   
   // Filter by timeframe if specified
   if (timeframe && timeframeService.isValidTimeframe(timeframe)) {
@@ -131,9 +150,10 @@ const searchMarkets = asyncHandler(async (req, res) => {
   
   let markets = await polymarketService.searchMarkets(q);
   
-  // Parse and limit results
+  // Parse, filter expired, and limit results
   markets = markets
     .map(m => polymarketService.parseMarket(m))
+    .filter(m => filterExpiredMarkets([m]).length > 0)
     .slice(0, parseInt(limit));
   
   return success(res, { markets, query: q });
@@ -161,6 +181,7 @@ const getMarketsByCategory = asyncHandler(async (req, res) => {
   
   markets = markets
     .map(m => polymarketService.parseMarket(m))
+    .filter(m => filterExpiredMarkets([m]).length > 0)
     .slice(0, parseInt(limit));
   
   // Cache result
@@ -185,9 +206,12 @@ const getTrendingMarkets = asyncHandler(async (req, res) => {
     return success(res, cached);
   }
   
-  let markets = await polymarketService.fetchTrendingMarkets(parseInt(limit));
+  let markets = await polymarketService.fetchTrendingMarkets(parseInt(limit) * 2); // Fetch extra to account for filtering
   
-  markets = markets.map(m => polymarketService.parseMarket(m));
+  markets = markets
+    .map(m => polymarketService.parseMarket(m))
+    .filter(m => filterExpiredMarkets([m]).length > 0)
+    .slice(0, parseInt(limit));
   
   // Cache result
   cacheService.cacheMarketList('trending', markets, 180); // 3 minutes

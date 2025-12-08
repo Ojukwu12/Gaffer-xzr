@@ -14,6 +14,32 @@ const metricsService = require('../services/metricsService');
 const logger = require('../config/logger');
 
 /**
+ * Generate unified prediction for a market (single YES/NO answer)
+ * GET /api/markets/:id/predict-unified
+ */
+const getUnifiedPrediction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { timeframe = 'daily' } = req.query;
+  
+  if (!timeframeService.isValidTimeframe(timeframe)) {
+    throw new CustomError(
+      `Invalid timeframe. Valid options: ${timeframeService.getEnabledTimeframes().join(', ')}`,
+      400,
+      'INVALID_TIMEFRAME'
+    );
+  }
+  
+  logger.info(`Generating unified prediction for market ${id}, timeframe: ${timeframe}`);
+  
+  const prediction = await predictionEngine.generateUnifiedPrediction(id, timeframe);
+  
+  // Track metrics
+  metricsService.recordPrediction(prediction, false);
+  
+  return success(res, prediction);
+});
+
+/**
  * Generate prediction for a market option
  * GET /api/markets/:id/predict
  */
@@ -159,6 +185,7 @@ const batchPredict = asyncHandler(async (req, res) => {
 
 module.exports = {
   getPrediction,
+  getUnifiedPrediction,
   getAllPredictions,
   getFeatures,
   getCachedPredictions,

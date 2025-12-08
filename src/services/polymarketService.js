@@ -204,6 +204,11 @@ const searchMarkets = async (query) => {
  * @returns {Object} Standardized market object
  */
 const parseMarket = (rawMarket) => {
+  // Handle image field: use "image" first, fallback to "twitterCardImage", then null
+  const image = (rawMarket.image && rawMarket.image.trim()) || 
+                (rawMarket.twitterCardImage && rawMarket.twitterCardImage.trim()) || 
+                null;
+
   return {
     marketId: rawMarket.condition_id || rawMarket.id,
     title: rawMarket.question || rawMarket.title,
@@ -217,8 +222,9 @@ const parseMarket = (rawMarket) => {
     createdAt: rawMarket.created_at || rawMarket.createdAt,
     endDate: rawMarket.end_date_iso || rawMarket.endDate,
     currentPrices: rawMarket.outcome_prices || rawMarket.prices || [],
-    image: rawMarket.image || null,
-    slug: rawMarket.slug || null
+    image,
+    slug: rawMarket.slug || null,
+    closed: rawMarket.closed || false
   };
 };
 
