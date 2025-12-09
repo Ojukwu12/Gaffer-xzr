@@ -95,24 +95,38 @@ This will:
 ✓ Admin user created successfully!
 
 Email:   admin@polyscope.app
-API Key: 7bd914b9afa5b47933e0c2dc220d623ce6195ad198b96f1aa8015eafdf2f0a6b
+API Key: <YOUR_SECURE_API_KEY_HERE>
 
 Usage example:
-curl -H "X-API-Key: 7bd914b9afa5b47933e0c2dc220d623ce6195ad198b96f1aa8015eafdf2f0a6b" http://localhost:5000/api/admin/debug
+curl -H "X-API-Key: <YOUR_SECURE_API_KEY_HERE>" http://localhost:5000/api/admin/debug
 ```
+
+⚠️ **IMPORTANT SECURITY NOTES:**
+- Store the API key in a **secure location** (password manager, CI/CD secrets)
+- Never commit API keys to version control
+- Never share API keys in documentation or chat
+- If compromised, regenerate immediately with `npm run setup`
+- Use environment variables to pass API keys to frontend/clients
+- In production, rotate keys regularly
 
 #### Sending API Key in Requests
 
 All admin requests must include the API key in the `X-API-Key` header:
 
 ```bash
-curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5000/api/admin/webhooks
+curl -H "X-API-Key: <YOUR_API_KEY>" http://localhost:5000/api/admin/webhooks
 ```
+
+⚠️ **Do NOT hardcode API keys in frontend code. Always use environment variables:**
 
 For frontend (JavaScript):
 
 ```javascript
-const apiKey = 'YOUR_API_KEY';
+// ✓ CORRECT - Use environment variable
+const apiKey = process.env.REACT_APP_ADMIN_API_KEY;
+
+// ✗ WRONG - Never hardcode API keys
+// const apiKey = '7bd914b9afa5b47933e0c2dc220d623...';
 
 fetch('http://localhost:5000/api/admin/webhooks', {
   method: 'GET',
