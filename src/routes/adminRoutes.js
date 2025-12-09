@@ -125,5 +125,103 @@ router.get('/stats/notifications',
   adminController.getNotificationStats
 );
 
+/**
+ * POST /api/admin/webhooks
+ * Create a new webhook
+ */
+router.post('/webhooks',
+  [
+    body('url')
+      .notEmpty()
+      .withMessage('Webhook URL is required')
+      .isURL()
+      .withMessage('Invalid URL format'),
+    body('events')
+      .isArray({ min: 1 })
+      .withMessage('At least one event is required'),
+    body('events.*')
+      .isIn(['prediction.created', 'prediction.updated', 'market.trending', 'whale.activity', 'high.confidence'])
+      .withMessage('Invalid event type')
+  ],
+  validateRequest,
+  adminController.createWebhook
+);
+
+/**
+ * GET /api/admin/webhooks
+ * List all webhooks
+ */
+router.get('/webhooks',
+  adminController.listWebhooks
+);
+
+/**
+ * GET /api/admin/webhooks/:id
+ * Get webhook by ID
+ */
+router.get('/webhooks/:id',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid webhook ID')
+  ],
+  validateRequest,
+  adminController.getWebhook
+);
+
+/**
+ * PUT /api/admin/webhooks/:id
+ * Update webhook
+ */
+router.put('/webhooks/:id',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid webhook ID'),
+    body('url')
+      .optional()
+      .isURL()
+      .withMessage('Invalid URL format'),
+    body('events')
+      .optional()
+      .isArray({ min: 1 })
+      .withMessage('At least one event is required'),
+    body('isActive')
+      .optional()
+      .isBoolean()
+      .withMessage('isActive must be a boolean')
+  ],
+  validateRequest,
+  adminController.updateWebhook
+);
+
+/**
+ * DELETE /api/admin/webhooks/:id
+ * Delete webhook
+ */
+router.delete('/webhooks/:id',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid webhook ID')
+  ],
+  validateRequest,
+  adminController.deleteWebhook
+);
+
+/**
+ * POST /api/admin/webhooks/:id/test
+ * Test webhook delivery
+ */
+router.post('/webhooks/:id/test',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid webhook ID')
+  ],
+  validateRequest,
+  adminController.testWebhook
+);
+
 module.exports = router;
 

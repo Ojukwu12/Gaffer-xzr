@@ -12,8 +12,10 @@ const llmService = require('../services/llmService');
 const emailService = require('../services/emailService');
 const webPushService = require('../services/webPushService');
 const notificationService = require('../services/notificationService');
+const webhookService = require('../services/webhookService');
 const logger = require('../config/logger');
 const mongoose = require('mongoose');
+const Webhook = require('../models/Webhook');
 
 /**
  * Clear cache
@@ -302,6 +304,212 @@ const getNotificationStats = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Create webhook
+ * POST /api/admin/webhooks
+ */
+const createWebhook = asyncHandler(async (req, res) => {
+  const { url, events, filters, metadata } = req.body;
+  
+  if (!url) {
+    throw new CustomError('Webhook URL is required', 400, 'MISSING_URL');
+  }
+  
+  if (!events || events.length === 0) {
+    throw new CustomError('At least one event is required', 400, 'MISSING_EVENTS');
+  }
+  
+  logger.info(`Creating webhook: ${url}`);
+  
+  const webhook = await Webhook.create({
+    url,
+    events,
+    filters: filters || {},
+    metadata: metadata || {},
+    isActive: true
+  });
+  
+  return success(res, {
+    webhook: {
+      id: webhook._id,
+      url: webhook.url,
+      secret: webhook.secret,
+      events: webhook.events,
+      filters: webhook.filters,
+      isActive: webhook.isActive,
+      createdAt: webhook.createdAt
+    }
+  }, 201);
+});
+
+/**
+ * List all webhooks
+ * GET /api/admin/webhooks
+ */
+const listWebhooks = asyncHandler(async (req, res) => {
+  const webhooks = await Webhook.find().sort({ createdAt: -1 });
+  
+  return success(res, {
+    webhooks: webhooks.map(w => ({
+      id: w._id,
+      url: w.url,
+      events: w.events,
+      filters: w.filters,
+      isActive: w.isActive,
+      stats: w.stats,
+      consecutiveFailures: w.consecutiveFailures,
+      lastError: w.lastError,
+      metadata: w.metadata,
+      createdAt: w.createdAt
+    })),
+    total: webhooks.length
+  });
+});
+
+/**
+ * Get webhook by ID
+ * GET /api/admin/webhooks/:id
+ */
+const getWebhook = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const webhook = await Webhook.findById(id);
+  
+  if (!webhook) {
+    throw new CustomError('Webhook not found', 404, 'WEBHOOK_NOT_FOUND');
+  }
+  
+  return success(res, {
+    webhook: {
+      id: webhook._id,
+      url: webhook.url,
+      secret: webhook.secret,
+      events: webhook.events,
+      filters: webhook.filters,
+      isActive: webhook.isActive,
+      stats: webhook.stats,
+      consecutiveFailures: webhook.consecutiveFailures,
+      lastError: webhook.lastError,
+      metadata: webhook.metadata,
+      retryConfig: webhook.retryConfig,
+      createdAt: webhook.createdAt,
+      updatedAt: webhook.updatedAt
+    }
+  });
+});
+
+/**
+ * Update webhook
+ * PUT /api/admin/webhooks/:id
+ */
+const updateWebhook = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { url, events, filters, isActive, metadata } = req.body;
+  
+  const webhook = await Webhook.findById(id);
+  
+  if (!webhook) {
+    throw new CustomError('Webhook not found', 404, 'WEBHOOK_NOT_FOUND');
+  }
+  
+  if (url) webhook.url = url;
+  if (events) webhook.events = events;
+  if (filters) webhook.filters = { ...webhook.filters, ...filters };
+  if (typeof isActive === 'boolean') webhook.isActive = isActive;
+  if (metadata) webhook.metadata = { ...webhook.metadata, ...metadata };
+  
+  await webhook.save();
+  
+  logger.info(`Webhook updated: ${id}`);
+  
+  return success(res, {
+    webhook: {
+      id: webhook._id,
+      url: webhook.url,
+      events: webhook.events,
+      filters: webhook.filters,
+      isActive: webhook.isActive,
+      updatedAt: webhook.updatedAt
+    }
+  });
+});
+
+/**
+ * Delete webhook
+ * DELETE /api/admin/webhooks/:id
+ */
+const deleteWebhook = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const webhook = await Webhook.findByIdAndDelete(id);
+  
+  if (!webhook) {
+    throw new CustomError('Webhook not found', 404, 'WEBHOOK_NOT_FOUND');
+  }
+  
+  logger.info(`Webhook deleted: ${id}`);
+  
+  return success(res, {
+    deleted: true,
+    id
+  });
+});
+
+/**
+ * Test webhook delivery
+ * POST /api/admin/webhooks/:id/test
+ */
+const testWebhook = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  const webhook = await Webhook.findById(id);
+  
+  if (!webhook) {
+    throw new CustomError('Webhook not found', 404, 'WEBHOOK_NOT_FOUND');
+  }
+  
+  logger.info(`Testing webhook: ${id}`);
+  
+  const testPayload = {
+    event: 'test.webhook',
+    data: {
+      message: 'This is a test webhook delivery',
+      timestamp: new Date().toISOString(),
+      marketId: 'test-market-123',
+      confidence: 85
+    },
+    timestamp: new Date().toISOString(),
+    webhookId: webhook._id
+  };
+  
+  const signature = webhook.generateSignature(testPayload);
+  
+  try {
+    const axios = require('axios');
+    const response = await axios.post(webhook.url, testPayload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
+        'X-Webhook-Event': 'test.webhook',
+        'User-Agent': 'Polyscope-Webhook/1.0'
+      },
+      timeout: 10000
+    });
+    
+    return success(res, {
+      tested: true,
+      status: response.status,
+      statusText: response.statusText
+    });
+  } catch (error) {
+    throw new CustomError(
+      `Webhook test failed: ${error.message}`,
+      500,
+      'WEBHOOK_TEST_FAILED'
+    );
+  }
+});
+
 module.exports = {
   clearCache,
   runCron,
@@ -312,5 +520,11 @@ module.exports = {
   testEmail,
   cleanupSubscriptions,
   getPredictionStats,
-  getNotificationStats
+  getNotificationStats,
+  createWebhook,
+  listWebhooks,
+  getWebhook,
+  updateWebhook,
+  deleteWebhook,
+  testWebhook
 };

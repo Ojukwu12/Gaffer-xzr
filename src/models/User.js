@@ -19,6 +19,26 @@ const userSchema = new mongoose.Schema({
     match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address']
   },
   
+  // API Key for authentication (admin users)
+  apiKey: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  
+  // User role
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
+  
+  // Last seen timestamp
+  lastSeen: {
+    type: Date,
+    default: null
+  },
+  
   preferences: {
     // Markets the user is interested in
     watchedMarkets: [{
@@ -77,6 +97,8 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ isActive: 1 });
 userSchema.index({ 'preferences.watchedMarkets': 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ apiKey: 1 });
+userSchema.index({ role: 1 });
 
 /**
  * Instance method to check if user should receive notification
