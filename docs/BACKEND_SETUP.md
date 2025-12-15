@@ -37,7 +37,7 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/polyscope?appNam
 
 # Polymarket API
 POLYMARKET_API_BASE=https://gamma-api.polymarket.com
-POLYMARKET_API_KEY=your_polymarket_api_key_here
+# No Polymarket API key is required. Leave key unset.
 
 # LLM Configuration (Google Gemini)
 LLM_API_KEY=your_gemini_api_key_here

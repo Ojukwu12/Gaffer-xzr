@@ -22,7 +22,7 @@ const polymarketClient = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    ...(config.polymarketApiKey && { 'Authorization': `Bearer ${config.polymarketApiKey}` })
+    // No Authorization header; Polymarket endpoints used here are public
   }
 });
 

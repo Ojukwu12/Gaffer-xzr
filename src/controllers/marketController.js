@@ -205,18 +205,44 @@ const getTrendingMarkets = asyncHandler(async (req, res) => {
   if (cached) {
     return success(res, cached);
   }
-  
-  let markets = await polymarketService.fetchTrendingMarkets(parseInt(limit) * 2); // Fetch extra to account for filtering
-  
-  markets = markets
-    .map(m => polymarketService.parseMarket(m))
-    .filter(m => filterExpiredMarkets([m]).length > 0)
-    .slice(0, parseInt(limit));
-  
-  // Cache result
-  cacheService.cacheMarketList('trending', markets, 180); // 3 minutes
-  
-  return success(res, { markets });
+  try {
+    // Primary: use Polymarket trending endpoint
+    let markets = await polymarketService.fetchTrendingMarkets(parseInt(limit) * 2); // Fetch extra to account for filtering
+    
+    markets = markets
+      .map(m => polymarketService.parseMarket(m))
+      .filter(m => filterExpiredMarkets([m]).length > 0)
+      .slice(0, parseInt(limit));
+    
+    // Cache result
+    cacheService.cacheMarketList('trending', markets, 180); // 3 minutes
+    
+    return success(res, { markets });
+  } catch (err) {
+    // Fallback: compute trending from active markets without requiring API key
+    logger.warn('Trending endpoint failed, falling back to computed trending', { error: err.message });
+    
+    let markets = await polymarketService.fetchMarkets({ closed: false, active: true });
+    
+    markets = markets
+      .map(m => polymarketService.parseMarket(m))
+      .filter(m => filterExpiredMarkets([m]).length > 0);
+    
+    // Sort by 24h volume (desc), then liquidity (desc) as secondary signal
+    markets.sort((a, b) => {
+      const vA = Number(a.volume24h || 0);
+      const vB = Number(b.volume24h || 0);
+      if (vB !== vA) return vB - vA;
+      const lA = Number(a.liquidity || 0);
+      const lB = Number(b.liquidity || 0);
+      return lB - lA;
+    });
+    
+    markets = markets.slice(0, parseInt(limit));
+    
+    cacheService.cacheMarketList('trending', markets, 180);
+    return success(res, { markets, fallback: true });
+  }
 });
 
 module.exports = {

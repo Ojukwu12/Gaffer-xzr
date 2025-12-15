@@ -18,7 +18,6 @@ const config = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/polyscope',
   
   // Polymarket API
-  polymarketApiKey: process.env.POLYMARKET_API_KEY || '',
   polymarketApiBase: process.env.POLYMARKET_API_BASE || 'https://gamma-api.polymarket.com',
   
   // LLM Configuration (Gemini Pro)
