@@ -189,7 +189,7 @@ const startServer = async () => {
     llmService.initializeClient();
     
     const emailService = require('./services/emailService');
-    emailService.initializeResend();
+    emailService.initializeTransporter();
     
     const webPushService = require('./services/webPushService');
     webPushService.initializeWebPush();

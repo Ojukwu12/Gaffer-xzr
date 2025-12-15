@@ -25,11 +25,11 @@ const config = {
   // Support both LLM_API_KEY and GEMINI_API_KEY for flexibility
   llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '',
   
-  // Email Service Configuration (Resend API)
-  // Get API key at: https://resend.com/api-keys
-  resendApiKey: process.env.RESEND_API_KEY || '',
-  email: {
-    from: process.env.EMAIL_FROM || 'noreply@polyscope.com'
+  // Email Service Configuration (Gmail SMTP)
+  gmail: {
+    user: process.env.GMAIL_USER || '',
+    password: process.env.GMAIL_PASSWORD || '',
+    emailFrom: process.env.GMAIL_USER || 'noreply@gmail.com'
   },
   
   // Web Push Configuration

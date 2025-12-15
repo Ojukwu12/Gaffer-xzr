@@ -1,32 +1,39 @@
 /**
  * Email Service
- * Handles email sending using Resend API
+ * Handles email sending using Gmail SMTP via nodemailer
  * @module services/emailService
  */
 
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const CustomError = require('../utils/CustomError');
 
 /**
- * Resend client instance
+ * Email transporter instance
  */
-let resendClient = null;
+let transporter = null;
 
 /**
- * Initializes Resend client
+ * Initializes email transporter with Gmail service
  * @returns {boolean} Success status
  */
-const initializeResend = () => {
-  if (!config.resendApiKey) {
-    logger.warn('Resend API key not configured');
+const initializeTransporter = () => {
+  if (!config.gmail.user || !config.gmail.password) {
+    logger.warn('Gmail credentials not configured');
     return false;
   }
   
-  if (!resendClient) {
-    resendClient = new Resend(config.resendApiKey);
-    logger.info('Resend client initialized');
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: config.gmail.user,
+        pass: config.gmail.password
+      }
+    });
+    
+    logger.info('Gmail transporter initialized');
   }
   
   return true;
@@ -38,12 +45,12 @@ const initializeResend = () => {
  * @returns {Promise<Object>} Send result
  */
 const sendEmail = async (options) => {
-  if (!initializeResend()) {
+  if (!initializeTransporter()) {
     throw new CustomError('Email service not configured', 500, 'EMAIL_NOT_CONFIGURED');
   }
   
-  const emailOptions = {
-    from: options.from || config.email.from || 'noreply@resend.dev',
+  const mailOptions = {
+    from: options.from || config.gmail.emailFrom,
     to: options.to,
     subject: options.subject,
     html: options.html,
@@ -53,19 +60,14 @@ const sendEmail = async (options) => {
   logger.info(`Sending email to ${options.to}: ${options.subject}`);
   
   try {
-    const result = await resendClient.emails.send(emailOptions);
+    const info = await transporter.sendMail(mailOptions);
     
-    if (result.error) {
-      logger.error(`Failed to send email: ${result.error.message}`);
-      throw new CustomError(result.error.message, 500, 'EMAIL_SEND_FAILED');
-    }
-    
-    logger.info(`Email sent: ${result.data.id}`);
+    logger.info(`Email sent: ${info.messageId}`);
     
     return {
-      messageId: result.data.id,
-      accepted: [options.to],
-      rejected: []
+      messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected
     };
   } catch (error) {
     logger.error(`Email send error: ${error.message}`);
@@ -470,12 +472,18 @@ const sendDailyDigest = async (to, predictions) => {
  * @returns {Promise<boolean>}
  */
 const testConnection = async () => {
-  if (!initializeResend()) {
+  if (!initializeTransporter()) {
     return false;
   }
   
-  logger.info('Resend email service verified');
-  return true;
+  try {
+    await transporter.verify();
+    logger.info('Gmail connection verified');
+    return true;
+  } catch (error) {
+    logger.error(`Gmail connection failed: ${error.message}`);
+    return false;
+  }
 };
 
 module.exports = {
@@ -486,5 +494,5 @@ module.exports = {
   sendHighConfidenceAlert,
   sendDailyDigest,
   testConnection,
-  initializeResend
+  initializeTransporter
 };
