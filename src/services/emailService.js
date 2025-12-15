@@ -1,44 +1,32 @@
 /**
  * Email Service
- * Handles email sending using Testmail.app
+ * Handles email sending using Resend API
  * @module services/emailService
  */
 
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const CustomError = require('../utils/CustomError');
 
 /**
- * Email transporter instance
+ * Resend client instance
  */
-let transporter = null;
+let resendClient = null;
 
 /**
- * Initializes email transporter
+ * Initializes Resend client
  * @returns {boolean} Success status
  */
-const initializeTransporter = () => {
-  if (!config.email.host || !config.email.user || !config.email.password) {
-    logger.warn('Email service not fully configured');
+const initializeResend = () => {
+  if (!config.resendApiKey) {
+    logger.warn('Resend API key not configured');
     return false;
   }
   
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: config.email.host,
-      port: config.email.port,
-      secure: false, // Use TLS
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
-    
-    logger.info('Email transporter initialized');
+  if (!resendClient) {
+    resendClient = new Resend(config.resendApiKey);
+    logger.info('Resend client initialized');
   }
   
   return true;
@@ -50,12 +38,12 @@ const initializeTransporter = () => {
  * @returns {Promise<Object>} Send result
  */
 const sendEmail = async (options) => {
-  if (!initializeTransporter()) {
+  if (!initializeResend()) {
     throw new CustomError('Email service not configured', 500, 'EMAIL_NOT_CONFIGURED');
   }
   
-  const mailOptions = {
-    from: options.from || config.email.from,
+  const emailOptions = {
+    from: options.from || config.email.from || 'noreply@resend.dev',
     to: options.to,
     subject: options.subject,
     html: options.html,
@@ -64,15 +52,25 @@ const sendEmail = async (options) => {
   
   logger.info(`Sending email to ${options.to}: ${options.subject}`);
   
-  const info = await transporter.sendMail(mailOptions);
-  
-  logger.info(`Email sent: ${info.messageId}`);
-  
-  return {
-    messageId: info.messageId,
-    accepted: info.accepted,
-    rejected: info.rejected
-  };
+  try {
+    const result = await resendClient.emails.send(emailOptions);
+    
+    if (result.error) {
+      logger.error(`Failed to send email: ${result.error.message}`);
+      throw new CustomError(result.error.message, 500, 'EMAIL_SEND_FAILED');
+    }
+    
+    logger.info(`Email sent: ${result.data.id}`);
+    
+    return {
+      messageId: result.data.id,
+      accepted: [options.to],
+      rejected: []
+    };
+  } catch (error) {
+    logger.error(`Email send error: ${error.message}`);
+    throw new CustomError(error.message, 500, 'EMAIL_SEND_FAILED');
+  }
 };
 
 /**
@@ -472,12 +470,11 @@ const sendDailyDigest = async (to, predictions) => {
  * @returns {Promise<boolean>}
  */
 const testConnection = async () => {
-  if (!initializeTransporter()) {
+  if (!initializeResend()) {
     return false;
   }
   
-  await transporter.verify();
-  logger.info('Email connection verified');
+  logger.info('Resend email service verified');
   return true;
 };
 
@@ -489,5 +486,5 @@ module.exports = {
   sendHighConfidenceAlert,
   sendDailyDigest,
   testConnection,
-  initializeTransporter
+  initializeResend
 };

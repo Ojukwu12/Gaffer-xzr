@@ -25,13 +25,10 @@ const config = {
   // Support both LLM_API_KEY and GEMINI_API_KEY for flexibility
   llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '',
   
-  // Email Service Configuration (Testmail.app)
-  // Support both EMAIL_SERVICE_* and SMTP_* variable names
+  // Email Service Configuration (Resend API)
+  // Get API key at: https://resend.com/api-keys
+  resendApiKey: process.env.RESEND_API_KEY || '',
   email: {
-    host: process.env.EMAIL_SERVICE_HOST || process.env.SMTP_HOST || 'smtp.testmail.app',
-    port: parseInt(process.env.EMAIL_SERVICE_PORT || process.env.SMTP_PORT || '587', 10),
-    user: process.env.EMAIL_SERVICE_USER || process.env.SMTP_USER || '',
-    password: process.env.EMAIL_SERVICE_PASSWORD || process.env.SMTP_PASS || '',
     from: process.env.EMAIL_FROM || 'noreply@polyscope.com'
   },
   

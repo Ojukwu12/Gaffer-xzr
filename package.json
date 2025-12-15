@@ -39,13 +39,14 @@
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^6.9.14",
+    "resend": "^6.6.0",
     "web-push": "^3.6.7",
     "winston": "^3.13.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4",
+    "eslint": "^8.57.0",
     "jest": "^29.7.0",
-    "supertest": "^6.3.3",
-    "eslint": "^8.57.0"
+    "nodemon": "^3.1.4",
+    "supertest": "^6.3.3"
   }
 }
