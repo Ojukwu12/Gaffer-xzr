@@ -18,7 +18,7 @@ Production-grade backend for predicting Polymarket outcomes using AI-powered ana
 - Node.js 18+ 
 - MongoDB
 - Google Gemini Pro API key
-- Testmail.app account (for emails)
+- Brevo account with API key (for email sending)
 
 ### Installation
 
@@ -218,10 +218,10 @@ MONGODB_URI=mongodb://localhost:27017/polyscope
 # LLM (Required)
 LLM_API_KEY=your_gemini_api_key
 
-# Email (Optional)
-EMAIL_SERVICE_HOST=smtp.testmail.app
-EMAIL_SERVICE_USER=your_username
-EMAIL_SERVICE_PASSWORD=your_password
+# Email (Optional - Brevo)
+BREVO_API_KEY=your_brevo_api_key
+EMAIL_FROM_ADDRESS=obiefunaokechukwu98@gmail.com
+EMAIL_FROM_NAME=Polyscope Notifications
 
 # Web Push (Optional)
 WEB_PUSH_VAPID_PUBLIC=your_public_key

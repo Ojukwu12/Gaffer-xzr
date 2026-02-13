@@ -32,12 +32,40 @@ const computePredictions = async () => {
     // Fetch active markets
     let markets = await polymarketService.fetchMarkets({ closed: false });
     
-    // Limit to top 50 most liquid markets to avoid rate limits
-    markets = markets
-      .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
-      .slice(0, 50);
+    // Apply minimum liquidity and volume filters
+    markets = markets.filter(m => 
+      (m.liquidity || 0) >= config.minLiquidityUsd && 
+      (m.volume24h || 0) >= config.minVolume24hUsd
+    );
     
-    logger.info(`Processing predictions for ${markets.length} markets`);
+    logger.info(`Filtered ${markets.length} markets by minimum liquidity/volume`);
+    
+    // Group markets by category and select top market per category
+    const marketsByCategory = {};
+    for (const market of markets) {
+      const category = market.category || 'Other';
+      if (!marketsByCategory[category]) {
+        marketsByCategory[category] = [];
+      }
+      marketsByCategory[category].push(market);
+    }
+    
+    // Get top market per category (sorted by liquidity)
+    const selectedMarkets = [];
+    for (const category in marketsByCategory) {
+      const topMarket = marketsByCategory[category]
+        .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
+        .slice(0, config.marketsPerCategory)[0];
+      
+      if (topMarket) {
+        selectedMarkets.push(topMarket);
+      }
+    }
+    
+    // Limit to configured max markets
+    markets = selectedMarkets.slice(0, config.maxMarketsPerRun);
+    
+    logger.info(`Selected ${markets.length} markets across ${Object.keys(marketsByCategory).length} categories (max per category: ${config.marketsPerCategory})`);
     
     // Process each market
     for (const market of markets) {
@@ -47,8 +75,8 @@ const computePredictions = async () => {
         const parsedMarket = polymarketService.parseMarket(market);
         const options = parsedMarket.options || ['Yes', 'No'];
         
-        // Generate prediction for first option in each timeframe
-        for (const timeframe of ['daily', 'weekly']) {
+        // Generate prediction for first option (daily timeframe only to reduce API load)
+        for (const timeframe of ['daily']) {
           try {
             const prediction = await predictionEngine.generatePrediction(
               parsedMarket.marketId,

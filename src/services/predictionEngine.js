@@ -161,10 +161,10 @@ const computeFeatures = async (marketData, option, timeframe) => {
   features.priceRange24h = features.highPrice24h - features.lowPrice24h;
   
   // Enhanced trend metrics with better calculations
-  const dailyPriceChange = marketData.dailyPriceChange || (Math.random() - 0.5) * 0.15;
+  const dailyPriceChange = marketData.dailyPriceChange || 0;
   features.dailyChange = dailyPriceChange;
-  features.weeklyChange = marketData.weeklyPriceChange || dailyPriceChange * (1.5 + Math.random());
-  features.monthlyChange = marketData.monthlyPriceChange || features.weeklyChange * (1.3 + Math.random());
+  features.weeklyChange = marketData.weeklyPriceChange || 0;
+  features.monthlyChange = marketData.monthlyPriceChange || 0;
   
   // Trend strength and direction
   features.trendScore = Math.max(0, Math.min(1, 0.5 + features.dailyChange * 2));

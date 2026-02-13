@@ -1,46 +1,39 @@
 /**
  * Email Service
- * Handles email sending using Gmail SMTP via nodemailer
+ * Handles email sending using Brevo API v3
  * @module services/emailService
  */
 
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const CustomError = require('../utils/CustomError');
 
-/**
- * Email transporter instance
- */
-let transporter = null;
+const BREVO_API_BASE = 'https://api.brevo.com/v3';
 
 /**
- * Initializes email transporter with Gmail service
+ * Brevo API client initialization flag
+ */
+let brevoInitialized = false;
+
+/**
+ * Initializes Brevo email service
  * @returns {boolean} Success status
  */
 const initializeTransporter = () => {
-  if (!config.gmail.user || !config.gmail.password) {
-    logger.warn('Gmail credentials not configured');
+  if (!config.brevo.apiKey) {
+    logger.warn('Brevo API key not configured');
     return false;
   }
   
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: config.gmail.user,
-        pass: config.gmail.password
-      }
-    });
-    
-    logger.info('Gmail transporter initialized');
-  }
+  brevoInitialized = true;
+  logger.info('Brevo email service initialized');
   
   return true;
 };
 
 /**
- * Sends an email
+ * Sends an email using Brevo API
  * @param {Object} options - Email options
  * @returns {Promise<Object>} Send result
  */
@@ -49,29 +42,47 @@ const sendEmail = async (options) => {
     throw new CustomError('Email service not configured', 500, 'EMAIL_NOT_CONFIGURED');
   }
   
-  const mailOptions = {
-    from: options.from || config.gmail.emailFrom,
-    to: options.to,
+  const emailPayload = {
+    to: [
+      {
+        email: options.to,
+        name: options.toName || options.to
+      }
+    ],
+    sender: {
+      name: config.brevo.emailFromName,
+      email: config.brevo.emailFrom
+    },
     subject: options.subject,
-    html: options.html,
-    text: options.text
+    htmlContent: options.html,
+    textContent: options.text
   };
-  
+
   logger.info(`Sending email to ${options.to}: ${options.subject}`);
   
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const response = await axios.post(
+      `${BREVO_API_BASE}/smtp/email`,
+      emailPayload,
+      {
+        headers: {
+          'api-key': config.brevo.apiKey,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
     
-    logger.info(`Email sent: ${info.messageId}`);
+    logger.info(`Email sent successfully: ${response.data.messageId}`);
     
     return {
-      messageId: info.messageId,
-      accepted: info.accepted,
-      rejected: info.rejected
+      messageId: response.data.messageId,
+      accepted: [options.to],
+      rejected: []
     };
   } catch (error) {
-    logger.error(`Email send error: ${error.message}`);
-    throw new CustomError(error.message, 500, 'EMAIL_SEND_FAILED');
+    const errorMessage = error.response?.data?.message || error.message;
+    logger.error(`Email send error: ${errorMessage}`);
+    throw new CustomError(errorMessage, 500, 'EMAIL_SEND_FAILED');
   }
 };
 
@@ -468,7 +479,7 @@ const sendDailyDigest = async (to, predictions) => {
 };
 
 /**
- * Tests email connection
+ * Tests email connection with Brevo API
  * @returns {Promise<boolean>}
  */
 const testConnection = async () => {
@@ -477,11 +488,22 @@ const testConnection = async () => {
   }
   
   try {
-    await transporter.verify();
-    logger.info('Gmail connection verified');
+    // Test Brevo API connection by making a simple account request
+    const response = await axios.get(
+      `${BREVO_API_BASE}/account`,
+      {
+        headers: {
+          'api-key': config.brevo.apiKey,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    logger.info(`Brevo connection verified - Account: ${response.data.email}`);
     return true;
   } catch (error) {
-    logger.error(`Gmail connection failed: ${error.message}`);
+    const errorMessage = error.response?.data?.message || error.message;
+    logger.error(`Brevo connection failed: ${errorMessage}`);
     return false;
   }
 };

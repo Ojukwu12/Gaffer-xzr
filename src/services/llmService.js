@@ -8,12 +8,15 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const CustomError = require('../utils/CustomError');
+const secondaryLlmService = require('./secondaryLlmService');
 
 /**
  * Initialize Gemini AI client
  */
 let genAI = null;
 let model = null;
+let rateLimitErrors = 0;
+let useSecondaryLLM = false;
 
 const initializeClient = () => {
   try {
@@ -29,7 +32,7 @@ const initializeClient = () => {
 };
 
 /**
- * Generates the prediction prompt for the LLM
+ * Generates the prediction prompt for the LLM (OPTIMIZED - minimal format to reduce tokens)
  * @param {Object} marketData - Market information
  * @param {string} option - Option being predicted
  * @param {Object} features - Computed features
@@ -39,9 +42,15 @@ const initializeClient = () => {
 const generatePrompt = (marketData, option, features, timeframe) => {
   features = features || {};
   marketData = marketData || {};
-  const systemPrompt = `SYSTEM PROMPT — POLYMARKET PREDICTION ENGINE
+  const systemPrompt = `You are a Polymarket prediction engine. Analyze market data and return a JSON prediction.
 
-You are an advanced prediction engine that analyzes Polymarket markets using external sentiment, price data, and metadata. Your job is to produce a single final predicted outcome ("YES" or "NO") with clear reasoning.
+OUTPUT FORMAT (JSON only):
+{
+  "success": true,
+  "prediction": "YES|NO",
+  "confidence": 0-100,
+  "reason": "2-3 sentence explanation"
+}
 
 1. DATA VALIDATION RULES
 
@@ -177,137 +186,33 @@ Then output:
 
   return `${systemPrompt}
 
-MARKET INFORMATION:
-- Title: ${marketData.title}
-- Description: ${marketData.description || 'N/A'}
-- Option: ${option}
-- Timeframe: ${timeframe}
-- Categories: ${marketData.categories?.join(', ') || 'N/A'}
-- Resolution Date: ${marketData.endDate || 'N/A'}
-- Current Date: ${new Date().toISOString().split('T')[0]}
-- Market ID: ${marketData.marketId || 'N/A'}
+MARKET: ${marketData.title || 'Unknown'}
+OPTION: ${option}
+TIMEFRAME: ${timeframe}
 
-MARKET VALIDATION STATUS:
-- Validation Status: ${features.validationStatus || 'unknown'}
-- Validation Issues: ${features.validationIssues?.join('; ') || 'None'}
-- Has Warnings: ${features.hasWarnings ? 'Yes' : 'No'}
-- Has Critical Errors: ${features.hasCriticalErrors ? 'Yes' : 'No'}
-- Market Quality Score: ${features.marketQualityScore || 'N/A'}/100 (Grade: ${features.marketQualityGrade || 'N/A'})
-- Market Quality: ${features.predictionReliability || 'unknown'}
-
-COMPUTED FEATURES (All values are normalized and calculated from real market data):
-
-LIQUIDITY & VOLUME:
-- Total Liquidity: $${features.liquidity?.toLocaleString() || 0}
-- Liquidity Score: ${features.liquidityScore?.toFixed(2) || 0} (0-1 scale)
-- Liquidity Risk: ${features.liquidityRisk?.toFixed(2) || 0} (${features.liquidityRisk > 0.6 ? 'HIGH' : features.liquidityRisk > 0.4 ? 'MEDIUM' : 'LOW'})
-- 24h Volume: $${features.volume24h?.toLocaleString() || 0}
-- 7d Volume: $${features.volume7d?.toLocaleString() || 0}
-- 30d Volume: $${features.volume30d?.toLocaleString() || 0}
-- Volume Growth (24h): ${features.volumeGrowth24h?.toFixed(2) || 0}%
-- Volume Growth (7d): ${features.volumeGrowth7d?.toFixed(2) || 0}%
-- Liquidity to Volume Ratio: ${features.liquidityToVolumeRatio?.toFixed(2) || 0}
-
-PRICE METRICS:
-- Current Price: $${features.currentPrice?.toFixed(4) || 0}
-- Implied Probability: ${features.impliedProbability?.toFixed(2) || 0}%
-- 24h High: $${features.highPrice24h?.toFixed(4) || 0}
-- 24h Low: $${features.lowPrice24h?.toFixed(4) || 0}
-- Price Range (24h): $${features.priceRange24h?.toFixed(4) || 0}
-- Price Volatility: ${features.priceVolatility?.toFixed(2) || 0}
-- Daily Change: ${((features.dailyChange || 0) * 100).toFixed(2)}%
-- Weekly Change: ${((features.weeklyChange || 0) * 100).toFixed(2)}%
-- Monthly Change: ${((features.monthlyChange || 0) * 100).toFixed(2)}%
-- All Options: ${features.priceDistribution?.map(d => `${d.option}: ${d.probability}`).join(', ') || 'N/A'}
-
-TREND & MOMENTUM:
-- Trend Score: ${features.trendScore?.toFixed(2) || 0} (0-1 scale)
-- Trend Direction: ${features.trendDirection || 'neutral'}
-- Trend Strength: ${features.trendStrength || 'weak'}
-- Momentum Score: ${features.momentumScore?.toFixed(2) || 0} (0-1 scale)
-- Momentum Index (RSI-like): ${features.momentumIndex?.toFixed(2) || 50} (0-100)
-- Momentum Signal: ${features.momentumSignal || 'neutral'}
-- Acceleration Score: ${features.accelerationScore?.toFixed(2) || 0}
-
-WHALE METRICS (Large trader analysis):
-- Whale Factor: ${features.whaleFactor?.toFixed(2) || 0} (0-1 scale, higher = more whale influence)
-- Whale Count: ${features.whaleCount || 0}
-- Whale Volume: $${features.whaleVolume?.toLocaleString() || 0}
-- Smart Money Flow: $${features.smartMoneyFlow?.toLocaleString() || 0}
-- Smart Money Direction: ${features.smartMoneyDirection?.toFixed(2) || 0} (-1 to 1, negative = bearish, positive = bullish)
-
-SENTIMENT & SOCIAL:
-- Sentiment Score: ${features.sentimentScore?.toFixed(2) || 0} (0-1 scale)
-- Sentiment Label: ${features.sentimentLabel || 'neutral'}
-- Social Mentions: ${features.socialMentions || 0}
-- Social Engagement: ${features.socialEngagement?.toFixed(2) || 0}%
-- Community Growth: ${((features.communityGrowth || 0) * 100).toFixed(2)}%
-- Virality Score: ${features.viralityScore?.toFixed(2) || 0} (0-1 scale)
-- Network Effect: ${features.networkEffect || 'weak'}
-
-MARKET ACTIVITY:
-- 24h Trades: ${features.tradeCount24h || 0}
-- 7d Trades: ${features.tradeCount7d || 0}
-- Unique Traders (24h): ${features.uniqueTraders24h || 0}
-- Unique Traders (7d): ${features.uniqueTraders7d || 0}
-- Avg Trade Size (24h): $${features.avgTradeSize24h?.toLocaleString() || 0}
-- Avg Trade Size (7d): $${features.avgTradeSize7d?.toLocaleString() || 0}
-- Trade Size Growth: ${features.tradeSizeGrowth?.toFixed(2) || 0}%
-- Participation Rate: ${((features.participationRate || 0) * 100).toFixed(2)}%
-- Participation Growth: ${features.participationGrowth?.toFixed(2) || 0}%
-- Active Participation Score: ${features.activeParticipationScore?.toFixed(2) || 0}
-
-MARKET DEPTH:
-- Bid-Ask Spread: $${features.bidAskSpread?.toFixed(4) || 0}
-- Order Book Depth: ${features.orderBookDepth || 0} orders
-- Market Depth Quality: ${features.marketDepthQuality || 'unknown'}
-
-MARKET MATURITY:
-- Market Age: ${features.marketAge || 0} days
-- Days Until Expiry: ${features.daysUntilExpiry || 'N/A'}
-- Hours Until Expiry: ${features.hoursUntilExpiry || 'N/A'}
-- Lifecycle Stage: ${features.lifecycleStage || 'unknown'}
-- Urgency Level: ${features.urgency || 'unknown'}
-- Time Risk Factor: ${features.timeRiskFactor?.toFixed(2) || 0}
-
-DISTRIBUTION & CONCENTRATION:
-- Total Holders: ${features.holderCount || 0}
-- Concentration Ratio: ${features.concentrationRatio?.toFixed(2) || 0} (top 10 holders share)
-- Market Concentration: ${features.marketConcentration || 'unknown'}
-- Concentration Risk: ${features.concentrationRisk || 'unknown'}
-- Gini Coefficient: ${features.giniCoefficient?.toFixed(2) || 0} (inequality measure)
-
-OPTION-SPECIFIC:
-- Option Popularity: ${features.optionPopularity?.toFixed(2) || 0}
-- Option Momentum: ${features.optionMomentum?.toFixed(2) || 0}
-- Option Count: ${features.optionCount || 2}
-- Is Binary Market: ${features.isBinaryMarket ? 'Yes' : 'No'}
-- Option Rank: ${features.optionRank || 'N/A'} of ${features.optionCount || 2}
-- Is Leading Option: ${features.isLeadingOption ? 'Yes' : 'No'}
-- Price Difference to Leader: ${features.priceDifferenceToLeader?.toFixed(4) || 0}
-- Competitiveness Score: ${features.competitiveness?.toFixed(2) || 0}
-
-RISK INDICATORS:
-- Overall Risk Score: ${features.riskScore?.toFixed(2) || 0}
+CRITICAL METRICS:
+- Liquidity: $${(features.liquidity || 0).toLocaleString()}
+- Volume 24h: $${(features.volume24h || 0).toLocaleString()}
+- Current Price: ${((features.currentPrice || 0) * 100).toFixed(1)}% (${features.impliedProbability?.toFixed(1) || 0}% probability)
+- Trend: ${features.trendDirection || 'neutral'} (${((features.trendScore || 0) * 100).toFixed(0)}%)
+- Sentiment: ${features.sentimentLabel || 'neutral'} (${((features.sentimentScore || 0) * 100).toFixed(0)}%)
+- Volatility: ${((features.priceVolatility || 0) * 100).toFixed(1)}%
 - Risk Level: ${features.riskLevel || 'unknown'}
-- Liquidity Risk: ${features.liquidityRisk?.toFixed(2) || 0}
-- Volume Risk: ${features.volumeRisk?.toFixed(2) || 0}
-- Time Risk: ${features.timeRisk?.toFixed(2) || 0}
-- Concentration Risk Score: ${features.concentrationRiskScore?.toFixed(2) || 0}
-- Anomaly Score: ${features.anomalyScore?.toFixed(2) || 0} (unusual activity detection)
-- Anomaly Details: ${features.anomalyDetails?.join('; ') || 'None detected'}
 
-EFFICIENCY & CORRELATION:
-- Market Efficiency: ${features.marketEfficiency?.toFixed(2) || 0}
-- Category Correlation: ${features.categoryCorrelation?.toFixed(2) || 0}
-- Market Category: ${features.marketCategory || 'uncategorized'}
-- Category Popularity: ${features.categoryPopularity?.toFixed(2) || 0}
+KEY SIGNALS:
+- Whale Factor: ${((features.whaleFactor || 0) * 100).toFixed(0)}%
+- Smart Money: ${features.smartMoneyDirection?.toFixed(2) || 0} (bullish=+1, bearish=-1)
+- Volume Growth: ${features.volumeGrowth24h?.toFixed(0) || 0}%
+- Days to Expiry: ${features.daysUntilExpiry || 'N/A'}
+- Anomalies: ${features.anomalyDetails?.slice(0, 2).join('; ') || 'None'}
 
-HISTORICAL:
-- Historical Accuracy: ${((features.historicalAccuracy || 0) * 100).toFixed(2)}%
-- Prediction Reliability: ${features.predictionReliability || 'unknown'}
+ANALYSIS:
+1. Is the market valid? (Check liquidity ${features.liquidity}, volume ${features.volume24h}, expiry ${features.daysUntilExpiry})
+2. What does price action suggest? (Current: ${((features.currentPrice || 0) * 100).toFixed(0)}%, Trend: ${features.trendDirection})
+3. Are smart traders buying or selling? (Whales: ${((features.whaleFactor || 0) * 100).toFixed(0)}%, Smart Money: ${((features.smartMoneyDirection || 0) * 100).toFixed(0)}%)
+4. What's the confidence? (Base on data quality, not sentiment alone)
 
-Provide ONLY the JSON response as specified in the system prompt, no additional text.`;
+Provide ONLY valid JSON response.`;
 };
 
 /**
@@ -316,9 +221,10 @@ Provide ONLY the JSON response as specified in the system prompt, no additional 
  * @param {string} option - Option being predicted
  * @param {Object} features - Computed features
  * @param {string} timeframe - Prediction timeframe
+ * @param {number} retryCount - Internal retry counter
  * @returns {Promise<Object>} Prediction result with confidence and reason
  */
-const generatePrediction = async (marketData, option, features, timeframe) => {
+const generatePrediction = async (marketData, option, features, timeframe, retryCount = 0) => {
   // Support legacy signature: (marketData, features)
   if (typeof option === 'object' && typeof features === 'undefined') {
     features = option;
@@ -331,17 +237,39 @@ const generatePrediction = async (marketData, option, features, timeframe) => {
 
   const prompt = generatePrompt(marketData, option, features, timeframe);
   
-  logger.info(`Generating prediction for market ${marketData.marketId}, option: ${option}`);
+  logger.info(`Generating prediction for market ${marketData.marketId}, option: ${option}${retryCount > 0 ? ` (retry ${retryCount})` : ''}${useSecondaryLLM ? ' [using secondary LLM]' : ''}`);
   
   const startTime = Date.now();
   
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  const text = response.text();
-  
-  const computationTime = Date.now() - startTime;
-  
-  logger.info(`LLM response received in ${computationTime}ms`);
+  try {
+    let text;
+    
+    // Use secondary LLM if primary (Gemini) is rate-limited
+    if (useSecondaryLLM) {
+      logger.info(`Switching to secondary LLM (${config.secondaryLlmProvider}) due to Gemini rate limiting`);
+      try {
+        text = await secondaryLlmService.generateSecondaryPrediction(prompt);
+      } catch (secondaryError) {
+        logger.warn(`Secondary LLM failed, fallback to Gemini: ${secondaryError.message}`);
+        // Fallback to Gemini anyway
+        useSecondaryLLM = false;
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        text = response.text();
+      }
+    } else {
+      // Primary: Use Gemini
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      text = response.text();
+    }
+    
+    const computationTime = Date.now() - startTime;
+    
+    logger.info(`LLM response received in ${computationTime}ms`);
+    
+    // Reset rate limit counter on success
+    rateLimitErrors = 0;
   
   // Parse JSON response
   let prediction;
@@ -394,6 +322,11 @@ const generatePrediction = async (marketData, option, features, timeframe) => {
     
     logger.info(`Prediction generated: success=${prediction.success}, prediction=${prediction.prediction || 'N/A'}, confidence=${prediction.confidence || 'N/A'}%`);
     
+    return {
+      ...prediction,
+      computationTime
+    };
+    
   } catch (parseError) {
     logger.error('Failed to parse LLM response:', { error: parseError.message, response: text });
     throw new CustomError(
@@ -403,11 +336,42 @@ const generatePrediction = async (marketData, option, features, timeframe) => {
       { rawResponse: text.substring(0, 500) }
     );
   }
-  
-  return {
-    ...prediction,
-    computationTime
-  };
+  } catch (error) {
+    // Check for rate limit error (429 Too Many Requests)
+    const is429 = error?.status === 429 || 
+                  error?.message?.includes('429') || 
+                  error?.message?.includes('rate_limit') ||
+                  error?.message?.includes('RESOURCE_EXHAUSTED');
+    
+    if (is429) {
+      rateLimitErrors++;
+      logger.warn(`Rate limit error (${rateLimitErrors}/${config.llmRateLimitThreshold}). Market: ${marketData.marketId}`, {
+        retryCount,
+        error: error.message
+      });
+      
+      // Switch to secondary LLM if threshold exceeded
+      if (rateLimitErrors >= config.llmRateLimitThreshold) {
+        logger.error('Rate limit threshold exceeded. Switching to secondary LLM if available.');
+        useSecondaryLLM = true;
+      }
+      
+      // Retry with exponential backoff
+      if (retryCount < config.llmMaxRetries) {
+        const delayMs = config.llmRetryDelayMs * Math.pow(2, retryCount);
+        logger.info(`Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${config.llmMaxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        return generatePrediction(marketData, option, features, timeframe, retryCount + 1);
+      } else {
+        logger.error('Max retries exceeded due to rate limiting');
+        throw new CustomError('Max retries exceeded due to rate limiting', 429, 'LLM_RATE_LIMITED');
+      }
+    }
+    
+    // For non-rate-limit errors, log and throw immediately
+    logger.error(`LLM prediction error: ${error.message}`, { marketId: marketData.marketId });
+    throw error;
+  }
 };
 
 /**

@@ -42,12 +42,11 @@ POLYMARKET_API_BASE=https://gamma-api.polymarket.com
 # LLM Configuration (Google Gemini)
 LLM_API_KEY=your_gemini_api_key_here
 
-# Email Service Configuration
-SMTP_HOST=smtp.testmail.app
-SMTP_PORT=587
-SMTP_USER=your_testmail_username
-SMTP_PASS=your_testmail_password
-EMAIL_FROM=noreply@polyscope.com
+# Email Service Configuration (Brevo API)
+# Get your API key from: https://app.brevo.com/settings/account/api
+BREVO_API_KEY=your_brevo_api_key_here
+EMAIL_FROM_ADDRESS=obiefunaokechukwu98@gmail.com
+EMAIL_FROM_NAME=Polyscope Notifications
 
 # Web Push Notifications (VAPID)
 VAPID_PUBLIC_KEY=your_vapid_public_key
@@ -382,7 +381,7 @@ Provides AI-powered market analysis and predictions.
 
 Sends email notifications to subscribers.
 
-**Configured with:** Testmail.app SMTP
+**Configured with:** Brevo API v3 (transactional email)
 **To use custom email:** Update `SMTP_*` variables
 
 ### Web Push Service

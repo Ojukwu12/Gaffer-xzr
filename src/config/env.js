@@ -20,15 +20,21 @@ const config = {
   // Polymarket API
   polymarketApiBase: process.env.POLYMARKET_API_BASE || 'https://gamma-api.polymarket.com',
   
-  // LLM Configuration (Gemini Pro)
+  // LLM Configuration (Primary: Gemini Pro)
   // Support both LLM_API_KEY and GEMINI_API_KEY for flexibility
   llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '',
   
-  // Email Service Configuration (Gmail SMTP)
-  gmail: {
-    user: process.env.GMAIL_USER || '',
-    password: process.env.GMAIL_PASSWORD || '',
-    emailFrom: process.env.GMAIL_USER || 'noreply@gmail.com'
+  // Secondary LLM (fallback for rate limiting)
+  secondaryLlmProvider: process.env.SECONDARY_LLM_PROVIDER || '', // 'claude' or 'ollama'
+  secondaryLlmApiKey: process.env.SECONDARY_LLM_API_KEY || '',
+  secondaryLlmModel: process.env.SECONDARY_LLM_MODEL || 'claude-3-5-sonnet-20241022',
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+  
+  // Email Service Configuration (Brevo API)
+  brevo: {
+    apiKey: process.env.BREVO_API_KEY || '',
+    emailFrom: process.env.EMAIL_FROM_ADDRESS || 'obiefunaokechukwu98@gmail.com',
+    emailFromName: process.env.EMAIL_FROM_NAME || 'Polyscope Notifications'
   },
   
   // Web Push Configuration
@@ -40,10 +46,21 @@ const config = {
   },
   
   // Cache Configuration
-  cacheTTL: parseInt(process.env.CACHE_TTL || '300', 10),
+  cacheTTL: parseInt(process.env.CACHE_TTL || '600', 10),
   
   // Notification Configuration
   notificationThreshold: parseInt(process.env.NOTIFICATION_THRESHOLD || '10', 10),
+  
+  // Prediction Engine Configuration
+  maxMarketsPerRun: parseInt(process.env.MAX_MARKETS_PER_RUN || '20', 10),
+  marketsPerCategory: parseInt(process.env.MARKETS_PER_CATEGORY || '1', 10),
+  minLiquidityUsd: parseInt(process.env.MIN_LIQUIDITY_USD || '1000', 10),
+  minVolume24hUsd: parseInt(process.env.MIN_VOLUME_24H_USD || '100', 10),
+  
+  // LLM Rate Limiting & Retry
+  llmMaxRetries: parseInt(process.env.LLM_MAX_RETRIES || '3', 10),
+  llmRetryDelayMs: parseInt(process.env.LLM_RETRY_DELAY_MS || '1000', 10),
+  llmRateLimitThreshold: parseInt(process.env.LLM_RATE_LIMIT_THRESHOLD || '3', 10),
   
   // Rate Limit Bypass
   devIp: process.env.DEV_IP || '127.0.0.1'
