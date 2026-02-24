@@ -10,6 +10,7 @@ const polymarketService = require('../services/polymarketService');
 const predictionEngine = require('../services/predictionEngine');
 const notificationService = require('../services/notificationService');
 const cacheService = require('../services/cacheService');
+const config = require('../config/env');
 
 /**
  * Main computation function

@@ -18,7 +18,7 @@ const getMetrics = async (req, res) => {
   
   const metrics = await metricsService.getMetrics();
   
-  success(res, 'Metrics retrieved', metrics);
+  success(res, metrics, 'Metrics retrieved');
 };
 
 /**
@@ -95,7 +95,7 @@ const resetMetrics = async (req, res) => {
   
   metricsService.resetMetrics();
   
-  success(res, 'Metrics reset successfully');
+  success(res, {}, 'Metrics reset successfully');
 };
 
 module.exports = {
