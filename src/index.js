@@ -5,6 +5,7 @@
  */
 
 const express = require('express');
+const path = require('path');
 const helmet = require('helmet');
 const cors = require('cors');
 const { corsOptions } = require('./config/cors');
@@ -111,6 +112,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/metrics', require('./routes/metricsRoutes'));
 // Back-compat route mounting for clients/tests expecting /api/predictions
 app.use('/api/predictions', predictionsCompatRoutes);
+app.use('/docs', express.static(path.join(__dirname, '../docs')));
 
 /**
  * Root endpoint
@@ -120,7 +122,7 @@ app.get('/', (req, res) => {
     name: 'Polyscope API',
     version: require('../package.json').version,
     description: 'Production-grade backend for predicting Polymarket outcomes',
-    documentation: '/docs/api-contract.md',
+    documentation: '/docs/API_DOCUMENTATION.md',
     endpoints: {
       health: '/health',
       markets: '/api/markets',
@@ -199,7 +201,7 @@ const startServer = async () => {
       logger.info(`🚀 Polyscope server running on port ${config.port}`);
       logger.info(`🌍 Environment: ${config.nodeEnv}`);
       logger.info(`📊 Health check: http://localhost:${config.port}/health`);
-      logger.info(`📚 API documentation: http://localhost:${config.port}/docs/api-contract.md`);
+      logger.info(`📚 API documentation: http://localhost:${config.port}/docs/API_DOCUMENTATION.md`);
       
       // Setup automatic cron jobs
       if (config.nodeEnv !== 'test') {

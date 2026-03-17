@@ -71,7 +71,11 @@ const config = {
  * @throws {Error} If critical env vars are missing
  */
 const validateConfig = () => {
-  const required = ['MONGODB_URI', 'LLM_API_KEY'];
+  const required = ['MONGODB_URI'];
+  const hasLlmKey = Boolean(process.env.LLM_API_KEY || process.env.GEMINI_API_KEY);
+  if (!hasLlmKey) {
+    required.push('LLM_API_KEY or GEMINI_API_KEY');
+  }
   const missing = required.filter(key => !process.env[key]);
 
   if (missing.length > 0) {

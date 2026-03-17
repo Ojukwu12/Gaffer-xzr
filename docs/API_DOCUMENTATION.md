@@ -1,9 +1,11 @@
 ﻿# Polyscope API Documentation
 
+Last updated: 2026-03-17
+
 ## Base URL
 ```
 Development: http://localhost:5000/api
-Production: https://your-domain.com/api
+Production: https://polyscope.onrender.com 
 ```
 
 ## Authentication
@@ -153,14 +155,14 @@ Generate prediction for a specific option
 {
   "success": true,
   "data": {
-    "success": true,
+    "answer": "YES",
     "marketId": "0x123...",
     "option": "Yes",
     "timeframe": "daily",
-    "prediction": "YES",
     "confidence": 75,
     "yes_probability": 65,
     "no_probability": 35,
+    "polymarketUrl": "https://polymarket.com/event/some-market-slug",
     "reason": "Strong positive sentiment + rising liquidity + bullish trend",
     "notes": "Market quality grade: B. No critical warnings.",
     "summary": {
@@ -233,9 +235,70 @@ Generate predictions for all options in a market
   "data": {
     "marketId": "0x123...",
     "predictions": [
-      { ... prediction for option 1 ... },
-      { ... prediction for option 2 ... }
+      {
+        "option": "Yes",
+        "answer": "YES",
+        "confidence": 74,
+        "polymarketUrl": "https://polymarket.com/event/some-market-slug"
+      },
+      {
+        "option": "No",
+        "answer": "NO",
+        "confidence": 71,
+        "polymarketUrl": "https://polymarket.com/event/some-market-slug"
+      }
     ]
+  }
+}
+```
+
+#### GET /api/predictions/performance
+Get prediction performance for frontend dashboards (max 30 days).
+
+**Query Parameters:**
+- `days` (optional, max: 30, default: 30): Reporting window in days
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "windowDays": 30,
+    "summary": {
+      "totalPredictions": 42,
+      "resolvedPredictions": 30,
+      "pendingPredictions": 12,
+      "correctPredictions": 19,
+      "incorrectPredictions": 11,
+      "winRate": 63.33
+    },
+    "correctPredictions": [
+      {
+        "marketId": "0x123...",
+        "marketTitle": "Will BTC hit $100k?",
+        "option": "Yes",
+        "predictedAnswer": "YES",
+        "actualAnswer": "YES",
+        "winningOption": "Yes",
+        "confidence": 78,
+        "predictedAt": "2026-03-01T09:00:00.000Z",
+        "polymarketUrl": "https://polymarket.com/event/will-btc-hit-100k"
+      }
+    ],
+    "incorrectPredictions": [
+      {
+        "marketId": "0x999...",
+        "marketTitle": "Will ETH ETF launch by June?",
+        "option": "Yes",
+        "predictedAnswer": "YES",
+        "actualAnswer": "NO",
+        "winningOption": "No",
+        "confidence": 69,
+        "predictedAt": "2026-03-03T10:30:00.000Z",
+        "polymarketUrl": "https://polymarket.com/event/will-eth-etf-launch-by-june"
+      }
+    ],
+    "pendingPredictions": []
   }
 }
 ```
@@ -303,14 +366,27 @@ Get cached predictions for a market (if available)
 ### Notifications
 
 #### POST /api/notifications/email/subscribe
-Subscribe to email notifications
+Subscribe to email notifications.
+
+Note: Email notification frequency is enforced as monthly for all opted-in email subscriptions.
 
 **Body:**
 ```json
 {
   "email": "user@example.com",
-  "marketId": "0x123...",
-  "threshold": 75
+  "markets": [
+    {
+      "marketId": "0x123...",
+      "marketTitle": "Will Bitcoin reach $100k by 2025?"
+    }
+  ],
+  "preferences": {
+    "frequency": "monthly",
+    "minConfidence": 70,
+    "maxNotificationsPerDay": 10,
+    "categories": ["Crypto"],
+    "includeFeatures": false
+  }
 }
 ```
 
@@ -319,14 +395,33 @@ Subscribe to email notifications
 {
   "success": true,
   "data": {
-    "message": "Successfully subscribed",
-    "subscriptionId": "sub_123..."
+    "subscribed": true,
+    "email": "user@example.com",
+    "verificationRequired": true,
+    "unsubscribeToken": "hex-token"
+  }
+}
+```
+
+#### GET /api/notifications/email/verify
+Verify an email subscription.
+
+**Query Parameters:**
+- `token` (required): Verification token sent by email
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "verified": true,
+    "email": "user@example.com"
   }
 }
 ```
 
 #### POST /api/notifications/push/subscribe
-Subscribe to push notifications
+Subscribe to push notifications.
 
 **Body:**
 ```json
@@ -338,16 +433,87 @@ Subscribe to push notifications
       "auth": "..."
     }
   },
-  "marketId": "0x123...",
-  "threshold": 75
+  "markets": [
+    {
+      "marketId": "0x123...",
+      "marketTitle": "Will Bitcoin reach $100k by 2025?"
+    }
+  ],
+  "preferences": {
+    "minConfidence": 70,
+    "maxNotificationsPerDay": 20
+  }
 }
 ```
 
-#### DELETE /api/notifications/email/unsubscribe
-Unsubscribe from email notifications
+#### POST /api/notifications/email/unsubscribe
+Unsubscribe from email notifications.
+
+**Body:**
+```json
+{
+  "token": "hex-token"
+}
+```
+
+Alternative body:
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+#### POST /api/notifications/push/unsubscribe
+Unsubscribe from push notifications.
+
+**Body:**
+```json
+{
+  "endpoint": "https://push-service/..."
+}
+```
+
+#### GET /api/notifications/push/vapid-public-key
+Get the VAPID public key used for web push subscription setup.
+
+#### POST /api/notifications/test
+Send a test notification through email and/or push.
+
+**Body:**
+```json
+{
+  "email": "user@example.com",
+  "pushSubscription": {
+    "endpoint": "https://...",
+    "keys": {
+      "p256dh": "...",
+      "auth": "..."
+    }
+  }
+}
+```
+
+#### PATCH /api/notifications/preferences
+Update notification preferences for email or push subscriptions.
+
+**Body:**
+```json
+{
+  "type": "email",
+  "identifier": "user@example.com",
+  "preferences": {
+    "frequency": "monthly",
+    "minConfidence": 75,
+    "maxNotificationsPerDay": 5,
+    "includeFeatures": true
+  }
+}
+```
+
+Note: For `type: "email"`, frequency is always enforced to `monthly`.
 
 **Query Parameters:**
-- `token`: Unsubscribe token
+- None
 
 ---
 

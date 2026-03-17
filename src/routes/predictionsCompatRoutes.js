@@ -9,6 +9,12 @@ const predictionController = require('../controllers/predictionController');
 
 const router = express.Router();
 
+// GET /api/predictions/performance
+// Returns one-month max win-rate summary with correct and incorrect predictions
+router.get('/performance', (req, res, next) => {
+  return predictionController.getPredictionPerformance(req, res, next);
+});
+
 // POST /api/predictions
 // Accepts a batch payload `{ markets: [...] }`. If payload is invalid, controller will return 400.
 router.post('/',

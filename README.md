@@ -8,8 +8,8 @@ Production-grade backend for predicting Polymarket outcomes using AI-powered ana
 - **AI-Powered Insights**: Google Gemini 2.5 Flash with strict validation
 - **Production Ready**: Full test suite, CI/CD pipeline, monitoring setup
 - **Security Hardened**: Rate limiting, CORS, input validation, authentication
-- **Well Documented**: 10+ comprehensive guides and API documentation
-- **Frontend Ready**: CORS configured with React/Vue/Angular examples
+- **Well Documented**: Central API documentation and setup guidance
+- **Frontend Ready**: Prediction responses include direct Polymarket links
 
 ## 🚀 Quick Start
 
@@ -33,7 +33,8 @@ npm run generate-keys
 cp .env.example .env
 
 # 4. Edit .env with your credentials
-# Required: MONGODB_URI, GEMINI_API_KEY, SMTP credentials
+# Required: MONGODB_URI, (LLM_API_KEY or GEMINI_API_KEY)
+# Recommended for production email: BREVO_API_KEY
 # VAPID keys already generated in step 2!
 
 # 5. Initialize database indexes
@@ -62,7 +63,7 @@ npm run test:watch
 npm run lint
 ```
 
-Server will start on `http://localhost:3000`
+Server will start on `http://localhost:5000` by default.
 
 ## 🧪 Testing
 
@@ -85,7 +86,7 @@ open coverage/lcov-report/index.html
 **Coverage Target**: 70%+ across all metrics
 **Test Files**: 70+ tests across unit, integration, and API tests
 
-See [TESTING_GUIDE.md](TESTING_GUIDE.md) for detailed testing documentation.
+See [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) for endpoint usage and examples.
 
 ## 🔄 CI/CD Pipeline
 
@@ -111,8 +112,8 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml) for pipeline configurat
   /middlewares     # Express middlewares
   /utils           # Utility functions
   /cron            # Background jobs
-  /docs            # API documentation
 index.js           # Server entry point
+docs/API_DOCUMENTATION.md  # API reference
 ```
 
 ## 🔑 Key Features
@@ -133,13 +134,14 @@ index.js           # Server entry point
 
 ### LLM Integration
 - **Google Gemini 2.5 Flash**: Advanced AI-powered predictions
+- **Secondary LLM Fallback**: Optional Claude/Ollama fallback for resiliency
 - **Strict System Prompt**: Validated, structured output format
 - **Confidence Scoring**: 0-100 confidence levels
 - **Key Factors**: Reasoning and risk identification
 - **Error Handling**: Comprehensive retry logic
 
 ### Communication & Notifications
-- **5 Email Templates**: Prediction alerts, digests, confirmations
+- **Brevo Email Delivery**: Transactional email notifications
 - **Web Push Notifications**: Real-time browser notifications
 - **Webhook System**: External integrations with HMAC signatures
 
@@ -152,18 +154,6 @@ index.js           # Server entry point
 - **Docker Support**: Complete containerization with compose
 - **Automated Backups**: MongoDB backup script with 7-day retention
 
-## 📧 Email Templates
-
-Five professionally designed, mobile-responsive templates:
-
-1. **Prediction Alert** - Beautiful gradient design with AI analysis
-2. **High Confidence** - Urgent alerts for 80%+ predictions
-3. **Daily Digest** - Top 5 predictions summary
-4. **Welcome Email** - Onboarding with API key
-5. **Subscription Confirmation** - Email verification
-
-See `docs/EMAIL-TEMPLATES.md` and `docs/VAPID-AND-EMAILS.md` for details.
-
 ## 🌐 API Endpoints
 
 ### Markets
@@ -174,9 +164,11 @@ See `docs/EMAIL-TEMPLATES.md` and `docs/VAPID-AND-EMAILS.md` for details.
 
 ### Predictions
 - `GET /api/markets/:id/predict` - Generate prediction
+- `GET /api/markets/:id/predict-unified` - Generate single YES/NO prediction
 - `GET /api/markets/:id/predict-all` - Predict all options
 - `GET /api/markets/:id/features` - Get features only
 - `POST /api/predictions/batch` - Batch predictions
+- `GET /api/predictions/performance` - Win-rate + correct/incorrect predictions (max 30 days)
 
 ### Notifications
 - `POST /api/notifications/email/subscribe` - Subscribe to email alerts
@@ -194,18 +186,9 @@ See `docs/EMAIL-TEMPLATES.md` and `docs/VAPID-AND-EMAILS.md` for details.
 
 ## 📖 Documentation
 
-Comprehensive documentation is available:
+Primary documentation:
 
-- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete API reference with examples
-- **[FEATURES.md](FEATURES.md)** - Detailed feature documentation (50+ features)
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testing infrastructure and best practices
-- **[MONITORING_SETUP.md](MONITORING_SETUP.md)** - Production monitoring setup
-- **[FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md)** - React/Vue/Angular examples
-- **[QUICK_START.md](QUICK_START.md)** - Getting started guide
-- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-deployment tasks
-- **[PRODUCTION_READINESS.md](PRODUCTION_READINESS.md)** - Full production readiness report
-- **[COMMANDS_REFERENCE.md](COMMANDS_REFERENCE.md)** - Quick command reference
-- **[GIT_PUSH_GUIDE.md](GIT_PUSH_GUIDE.md)** - Branch strategy and workflow
+- **[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)** - Complete API reference with current request/response formats
 
 ## ⚙️ Configuration
 
@@ -217,11 +200,14 @@ MONGODB_URI=mongodb://localhost:27017/polyscope
 
 # LLM (Required)
 LLM_API_KEY=your_gemini_api_key
+# OR
+GEMINI_API_KEY=your_gemini_api_key
 
 # Email (Optional - Brevo)
 BREVO_API_KEY=your_brevo_api_key
 EMAIL_FROM_ADDRESS=obiefunaokechukwu98@gmail.com
 EMAIL_FROM_NAME=Polyscope Notifications
+APP_URL=http://localhost:5000
 
 # Web Push (Optional)
 WEB_PUSH_VAPID_PUBLIC=your_public_key
@@ -249,9 +235,9 @@ npm run refresh
 
 - **Express.js** - Web framework
 - **MongoDB + Mongoose** - Database
-- **Google Gemini Pro** - AI predictions
+- **Google Gemini 2.5 Flash** - AI predictions
 - **Node-Cache** - In-memory caching
-- **Nodemailer** - Email service
+- **Brevo API (Axios)** - Email service
 - **Web-Push** - Push notifications
 - **Winston** - Logging
 - **Helmet + CORS** - Security

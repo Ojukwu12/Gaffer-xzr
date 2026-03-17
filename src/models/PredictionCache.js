@@ -40,6 +40,11 @@ const predictionCacheSchema = new mongoose.Schema({
   
   // Prediction results
   prediction: {
+    answer: {
+      type: String,
+      enum: ['YES', 'NO']
+    },
+
     confidence: {
       type: Number,
       required: [true, 'Confidence is required'],
@@ -52,6 +57,13 @@ const predictionCacheSchema = new mongoose.Schema({
       required: [true, 'Reason is required'],
       trim: true
     },
+
+    yes_probability: Number,
+    no_probability: Number,
+    notes: String,
+    summary: mongoose.Schema.Types.Mixed,
+    polymarketUrl: String,
+    timestamp: String,
     
     // All computed features (40+)
     features: {

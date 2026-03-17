@@ -259,6 +259,21 @@ const validateMarket = (market) => {
   return true;
 };
 
+/**
+ * Builds a user-facing Polymarket URL for direct betting navigation
+ * @param {Object} market - Market object
+ * @param {string} market.marketId - Market ID
+ * @param {string|null} market.slug - Market slug
+ * @returns {string}
+ */
+const getMarketUrl = ({ marketId, slug }) => {
+  if (slug) {
+    return `https://polymarket.com/event/${encodeURIComponent(slug)}`;
+  }
+
+  return `https://polymarket.com/market/${encodeURIComponent(marketId)}`;
+};
+
 module.exports = {
   fetchMarkets,
   fetchMarketById,
@@ -273,5 +288,6 @@ module.exports = {
   searchMarkets,
   parseMarket,
   batchFetchMarkets,
-  validateMarket
+  validateMarket,
+  getMarketUrl
 };

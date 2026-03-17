@@ -20,7 +20,7 @@ const initializeWebPush = () => {
   
   const subject = config.webPush.subject && config.webPush.subject.trim().length > 0
     ? config.webPush.subject
-    : ('mailto:' + config.email.from);
+    : ('mailto:' + (config.brevo.emailFrom || 'admin@polyscope.com'));
 
   webpush.setVapidDetails(
     subject,

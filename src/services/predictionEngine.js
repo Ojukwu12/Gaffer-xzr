@@ -11,6 +11,7 @@ const llmService = require('./llmService');
 const whaleFactorService = require('./whaleFactorService');
 const timeframeService = require('./timeframeService');
 const cacheService = require('./cacheService');
+const predictionTrackingService = require('./predictionTrackingService');
 
 /**
  * Validates market data before processing
@@ -448,7 +449,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
       fromCache: true,
       marketId,
       option,
-      timeframe
+      timeframe,
+      polymarketUrl: cached.polymarketUrl || polymarketService.getMarketUrl({ marketId, slug: null })
     };
   }
   
@@ -497,6 +499,10 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
 
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, option);
+  const polymarketUrl = polymarketService.getMarketUrl({
+    marketId,
+    slug: marketData.slug || null
+  });
   
   // Construct final prediction object with the main answer (YES/NO)
   const prediction = {
@@ -507,7 +513,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     reason: llmResult.reason,
     notes: llmResult.notes,
     features,
-    summary: marketSummary
+    summary: marketSummary,
+    polymarketUrl
   };
   
   const totalTime = Date.now() - overallStart;
@@ -524,6 +531,19 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   );
   
   logger.info(`Prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+
+  await predictionTrackingService.recordPrediction({
+    marketId,
+    marketTitle: marketData.title,
+    marketSlug: marketData.slug || null,
+    polymarketUrl,
+    option,
+    timeframe,
+    predictionType: 'option',
+    predictedAnswer: prediction.answer,
+    confidence: prediction.confidence,
+    reason: prediction.reason
+  });
   
   return {
     ...prediction,
@@ -595,6 +615,10 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
 
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, representativeOption);
+  const polymarketUrl = polymarketService.getMarketUrl({
+    marketId,
+    slug: marketData.slug || null
+  });
   
   // Construct final unified prediction object
   const prediction = {
@@ -604,12 +628,26 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     no_probability: llmResult.no_probability,
     reason: llmResult.reason,
     notes: llmResult.notes,
-    summary: marketSummary
+    summary: marketSummary,
+    polymarketUrl
   };
   
   const totalTime = Date.now() - overallStart;
   
   logger.info(`Unified prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+
+  await predictionTrackingService.recordPrediction({
+    marketId,
+    marketTitle: marketData.title,
+    marketSlug: marketData.slug || null,
+    polymarketUrl,
+    option: representativeOption,
+    timeframe,
+    predictionType: 'unified',
+    predictedAnswer: prediction.answer,
+    confidence: prediction.confidence,
+    reason: prediction.reason
+  });
   
   return {
     ...prediction,

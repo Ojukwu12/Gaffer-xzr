@@ -21,6 +21,10 @@ const logger = require('../config/logger');
  */
 const subscribeEmail = asyncHandler(async (req, res) => {
   const { email, markets, preferences } = req.body;
+  const normalizedEmailPreferences = {
+    ...(preferences || {}),
+    frequency: 'monthly'
+  };
   
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
     throw new CustomError('Valid email address is required', 400, 'INVALID_EMAIL');
@@ -37,7 +41,7 @@ const subscribeEmail = asyncHandler(async (req, res) => {
   if (subscription) {
     // Update existing subscription
     subscription.markets = markets || subscription.markets;
-    subscription.preferences = { ...subscription.preferences, ...preferences };
+    subscription.preferences = { ...subscription.preferences, ...normalizedEmailPreferences };
     subscription.isActive = true;
     subscription.unsubscribeToken = unsubscribeToken;
     await subscription.save();
@@ -48,7 +52,7 @@ const subscribeEmail = asyncHandler(async (req, res) => {
     subscription = await EmailSubscription.create({
       email,
       markets: markets || [],
-      preferences: preferences || {},
+      preferences: normalizedEmailPreferences,
       unsubscribeToken,
       verificationToken,
       metadata: {
@@ -272,7 +276,15 @@ const updatePreferences = asyncHandler(async (req, res) => {
     throw new CustomError('Subscription not found', 404, 'NOT_FOUND');
   }
   
-  subscription.preferences = { ...subscription.preferences, ...preferences };
+  if (type === 'email') {
+    subscription.preferences = {
+      ...subscription.preferences,
+      ...preferences,
+      frequency: 'monthly'
+    };
+  } else {
+    subscription.preferences = { ...subscription.preferences, ...preferences };
+  }
   await subscription.save();
   
   logger.info(`Updated preferences for ${type}: ${identifier}`);

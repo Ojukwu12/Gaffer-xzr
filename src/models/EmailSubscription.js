@@ -40,8 +40,8 @@ const emailSubscriptionSchema = new mongoose.Schema({
   preferences: {
     frequency: {
       type: String,
-      enum: ['immediate', 'daily', 'weekly'],
-      default: 'daily'
+      enum: ['immediate', 'daily', 'weekly', 'monthly'],
+      default: 'monthly'
     },
     
     // Minimum confidence to trigger notification
@@ -171,17 +171,9 @@ emailSubscriptionSchema.methods.canReceiveNotification = function() {
   const now = new Date();
   const lastSent = new Date(this.lastNotificationSent);
   const hoursSinceLastNotification = (now - lastSent) / (1000 * 60 * 60);
-  
-  switch (this.preferences.frequency) {
-    case 'immediate':
-      return hoursSinceLastNotification >= 0.5; // At least 30 minutes between notifications
-    case 'daily':
-      return hoursSinceLastNotification >= 24;
-    case 'weekly':
-      return hoursSinceLastNotification >= 168;
-    default:
-      return false;
-  }
+
+  // Email digest cadence is fixed to monthly for opted-in subscriptions.
+  return hoursSinceLastNotification >= 730;
 };
 
 /**

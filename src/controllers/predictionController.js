@@ -11,6 +11,7 @@ const predictionEngine = require('../services/predictionEngine');
 const polymarketService = require('../services/polymarketService');
 const timeframeService = require('../services/timeframeService');
 const metricsService = require('../services/metricsService');
+const predictionTrackingService = require('../services/predictionTrackingService');
 const logger = require('../config/logger');
 
 /**
@@ -183,11 +184,27 @@ const batchPredict = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Get frontend-friendly prediction performance for last month max
+ * GET /api/predictions/performance
+ */
+const getPredictionPerformance = asyncHandler(async (req, res) => {
+  const requestedDays = Number(req.query.days) || 30;
+  const days = Math.min(30, Math.max(1, requestedDays));
+
+  logger.info(`Fetching prediction performance for last ${days} day(s)`);
+
+  const performance = await predictionTrackingService.getPredictionPerformance(days);
+
+  return success(res, performance);
+});
+
 module.exports = {
   getPrediction,
   getUnifiedPrediction,
   getAllPredictions,
   getFeatures,
   getCachedPredictions,
-  batchPredict
+  batchPredict,
+  getPredictionPerformance
 };
