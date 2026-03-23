@@ -5,6 +5,7 @@
  */
 
 const asyncHandler = require('../middlewares/asyncHandler');
+const externalDataMonitoringService = require('../services/externalDataMonitoringService');
 const { success } = require('../utils/responseFormatter');
 const CustomError = require('../utils/CustomError');
 const cacheService = require('../services/cacheService');
@@ -13,6 +14,8 @@ const emailService = require('../services/emailService');
 const webPushService = require('../services/webPushService');
 const notificationService = require('../services/notificationService');
 const webhookService = require('../services/webhookService');
+const predictionModerationService = require('../services/predictionModerationService');
+const polymarketService = require('../services/polymarketService');
 const logger = require('../config/logger');
 const mongoose = require('mongoose');
 const Webhook = require('../models/Webhook');
@@ -225,6 +228,56 @@ const cleanupSubscriptions = asyncHandler(async (req, res) => {
     cleaned: true,
     ...result
   });
+});
+
+/**
+ * Get diagnostics for a specific market's external data
+ * GET /api/admin/external-data/:marketId
+ */
+const getExternalDataDiagnostics = asyncHandler(async (req, res) => {
+  const { marketId } = req.params;
+
+  if (!marketId) {
+    throw new CustomError('Market ID is required', 400, 'MISSING_MARKET_ID');
+  }
+
+  logger.info(`Fetching external data diagnostics for market: ${marketId}`);
+
+  const diagnostics = externalDataMonitoringService.getMarketDiagnostics(marketId);
+
+  if (!diagnostics) {
+    throw new CustomError(
+      'No diagnostics found for this market. Market may not have been analyzed yet or diagnostics have expired.',
+      404,
+      'DIAGNOSTICS_NOT_FOUND'
+    );
+  }
+
+  return success(res, diagnostics);
+});
+
+/**
+ * Check health of external data sources
+ * GET /api/admin/health/external-sources
+ */
+const checkExternalSourcesHealth = asyncHandler(async (req, res) => {
+  logger.info('Running external data source health check');
+
+  const healthStatus = await externalDataMonitoringService.checkExternalSourceHealth();
+
+  return success(res, healthStatus);
+});
+
+/**
+ * Get external data metrics and statistics
+ * GET /api/admin/metrics/external-data
+ */
+const getExternalDataMetrics = asyncHandler(async (req, res) => {
+  logger.info('Fetching external data metrics');
+
+  const metrics = externalDataMonitoringService.getMetrics();
+
+  return success(res, metrics);
 });
 
 /**
@@ -510,6 +563,133 @@ const testWebhook = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * List predictions for moderation
+ * GET /api/admin/predictions
+ */
+const listPredictions = asyncHandler(async (req, res) => {
+  const {
+    status,
+    marketId,
+    timeframe,
+    mode,
+    limit = 50,
+    offset = 0
+  } = req.query;
+
+  const result = await predictionModerationService.listPredictions({
+    status,
+    marketId,
+    timeframe,
+    evaluationMode: mode,
+    limit: Number(limit),
+    offset: Number(offset)
+  });
+
+  return success(res, {
+    total: result.total,
+    count: result.items.length,
+    predictions: result.items
+  });
+});
+
+/**
+ * Approve pending/rejected prediction
+ * POST /api/admin/predictions/:id/approve
+ */
+const approvePrediction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reviewNotes = '' } = req.body;
+  const reviewedBy = req.user?.email || req.user?.id || 'admin';
+
+  const prediction = await predictionModerationService.approvePrediction({
+    predictionId: id,
+    reviewedBy,
+    reviewNotes
+  });
+
+  if (!prediction) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  try {
+    const rawMarket = await polymarketService.fetchMarketById(prediction.marketId);
+    const marketData = polymarketService.parseMarket(rawMarket);
+
+    await notificationService.sendPredictionNotification(
+      prediction.marketId,
+      {
+        option: prediction.option,
+        confidence: prediction.confidence,
+        reason: predictionModerationService.resolveDisplayReason(prediction),
+        timeframe: prediction.timeframe
+      },
+      marketData
+    );
+  } catch (error) {
+    logger.warn(`Approved prediction notification failed for ${prediction.marketId}: ${error.message}`);
+  }
+
+  return success(res, {
+    approved: true,
+    prediction
+  });
+});
+
+/**
+ * Reject prediction
+ * POST /api/admin/predictions/:id/reject
+ */
+const rejectPrediction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reviewNotes = '' } = req.body;
+  const reviewedBy = req.user?.email || req.user?.id || 'admin';
+
+  const prediction = await predictionModerationService.rejectPrediction({
+    predictionId: id,
+    reviewedBy,
+    reviewNotes
+  });
+
+  if (!prediction) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, {
+    rejected: true,
+    prediction
+  });
+});
+
+/**
+ * Edit AI probability (before or after approval)
+ * PATCH /api/admin/predictions/:id/probability
+ */
+const editPredictionProbability = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { aiProbability } = req.body;
+  const editedBy = req.user?.email || req.user?.id || 'admin';
+
+  if (!Number.isFinite(Number(aiProbability))) {
+    throw new CustomError('aiProbability must be a number from 0 to 100', 400, 'INVALID_AI_PROBABILITY');
+  }
+
+  const prediction = await predictionModerationService.editAiProbability({
+    predictionId: id,
+    aiProbability: Number(aiProbability),
+    editedBy
+  });
+
+  if (!prediction) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, {
+    updated: true,
+    prediction
+  });
+});
+
 module.exports = {
   clearCache,
   runCron,
@@ -519,6 +699,9 @@ module.exports = {
   testLLM,
   testEmail,
   cleanupSubscriptions,
+  getExternalDataDiagnostics,
+  checkExternalSourcesHealth,
+  getExternalDataMetrics,
   getPredictionStats,
   getNotificationStats,
   createWebhook,
@@ -526,5 +709,9 @@ module.exports = {
   getWebhook,
   updateWebhook,
   deleteWebhook,
-  testWebhook
+  testWebhook,
+  listPredictions,
+  approvePrediction,
+  rejectPrediction,
+  editPredictionProbability
 };

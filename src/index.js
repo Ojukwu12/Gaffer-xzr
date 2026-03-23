@@ -185,6 +185,27 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDB();
     logger.info('Database connected successfully');
+
+    // Optional hard gate to prevent going live before paper validation proves readiness.
+    if (config.nodeEnv === 'production' && config.enforceProductionReadiness) {
+      const predictionTrackingService = require('./services/predictionTrackingService');
+      const readiness = await predictionTrackingService.getProductionReadiness({
+        days: config.readinessWindowDays,
+        evaluationMode: config.readinessMode,
+        minResolved: config.readinessMinResolved,
+        minLowerBound: config.minWinRateLowerBound
+      });
+
+      if (!readiness.ready) {
+        logger.error('Production readiness gate failed', readiness.checks);
+        for (const reason of readiness.reasons || []) {
+          logger.error(`Readiness reason: ${reason}`);
+        }
+        throw new Error('Production start blocked by readiness gate');
+      }
+
+      logger.info('Production readiness gate passed', readiness.checks);
+    }
     
     // Initialize services
     const llmService = require('./services/llmService');

@@ -180,6 +180,9 @@ docs/API_DOCUMENTATION.md  # API reference
 - `POST /api/admin/cron/run` - Run cron jobs
 - `GET /api/admin/debug` - System information
 - `GET /api/admin/stats/predictions` - Prediction stats
+- `GET /api/admin/external-data/:marketId` - External score diagnostics for a market
+- `GET /api/admin/health/external-sources` - External API/source health checks
+- `GET /api/admin/metrics/external-data` - External data monitoring metrics
 
 ### Health
 - `GET /health` - System health check
@@ -230,6 +233,34 @@ npm run dev
 # Test prediction computation
 npm run refresh
 ```
+
+## ✅ Pre-Production Validation (Recommended)
+
+Before enabling live notifications and production mode, run the system in paper mode and require statistical readiness:
+
+```bash
+# 1) Keep predictions in paper mode (no live notifications)
+export PREDICTION_MODE=paper
+
+# 2) Run regular prediction cycles to accumulate paper records
+npm run paper:run
+
+# 3) Evaluate readiness using resolved paper predictions
+npm run readiness:check -- --mode=paper --days=30 --minResolved=100 --minLowerBound=51
+```
+
+Optional hard startup gate for production:
+
+```bash
+export NODE_ENV=production
+export ENFORCE_PRODUCTION_READINESS=true
+export READINESS_MODE=paper
+export READINESS_MIN_RESOLVED=100
+export MIN_WIN_RATE_LOWER_BOUND=51
+npm start
+```
+
+If readiness does not pass, server startup is blocked in production mode when `ENFORCE_PRODUCTION_READINESS=true`.
 
 ## 📊 Architecture
 

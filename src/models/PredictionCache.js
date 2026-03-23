@@ -60,6 +60,16 @@ const predictionCacheSchema = new mongoose.Schema({
 
     yes_probability: Number,
     no_probability: Number,
+    marketClassification: String,
+    marketPredictabilityScore: Number,
+    signalStrengthScore: Number,
+    confidenceScore: Number,
+    differenceBetweenMarketProbabilityAndAI: Number,
+    mispricingScore: Number,
+    mispricingDirection: String,
+    expectedEdgeScore: Number,
+    marketBucket: mongoose.Schema.Types.Mixed,
+    thresholdsUsed: mongoose.Schema.Types.Mixed,
     notes: String,
     summary: mongoose.Schema.Types.Mixed,
     polymarketUrl: String,
@@ -145,7 +155,12 @@ const predictionCacheSchema = new mongoose.Schema({
       smartMoneyDirection: Number,
       
       // Anomaly
-      anomalyScore: Number
+      anomalyScore: Number,
+
+      // Accuracy filtering metadata
+      marketPredictabilityScore: Number,
+      signalStrengthScore: Number,
+      marketClassification: String
     }
   },
   

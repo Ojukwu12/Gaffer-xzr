@@ -10,6 +10,8 @@ const config = require('../config/env');
 const CustomError = require('../utils/CustomError');
 const secondaryLlmService = require('./secondaryLlmService');
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
 /**
  * Initialize Gemini AI client
  */
@@ -49,6 +51,10 @@ OUTPUT FORMAT (JSON only):
   "success": true,
   "prediction": "YES|NO",
   "confidence": 0-100,
+  "marketClassification": "politics|crypto|technology|global events|finance/economy|unpredictable/noise",
+  "marketPredictabilityScore": 0-100,
+  "signalStrengthScore": 0-100,
+  "mispricingScore": 0-100,
   "reason": "2-3 sentence explanation"
 }
 
@@ -138,6 +144,10 @@ Your final response MUST always be in this JSON structure:
   "yes_probability": <number 0-100>,
   "no_probability": <number 0-100>,
   "confidence": <0-100>,
+  "marketClassification": "politics|crypto|technology|global events|finance/economy|unpredictable/noise",
+  "marketPredictabilityScore": <0-100>,
+  "signalStrengthScore": <0-100>,
+  "mispricingScore": <0-100>,
   "reason": "<Clear explanation: why the selected side > why the other side>",
   "notes": "<Any warnings: low liquidity, data conflict, similar markets detected, etc.>"
 }
@@ -205,12 +215,20 @@ KEY SIGNALS:
 - Volume Growth: ${features.volumeGrowth24h?.toFixed(0) || 0}%
 - Days to Expiry: ${features.daysUntilExpiry || 'N/A'}
 - Anomalies: ${features.anomalyDetails?.slice(0, 2).join('; ') || 'None'}
+- Market Classification (pre-computed): ${features.marketClassification || 'unknown'}
+- Predictability Score (pre-computed): ${features.marketPredictabilityScore || 0}%
+- Signal Strength Score (pre-computed): ${features.signalStrengthScore || 0}%
+- External Data Source: ${features.externalDataSourceType || 'none'}
+- External Composite Score: ${features.externalDataCompositeScore ?? 50}%
+- External Signal Strength: ${(Number(features.externalDataSignalStrength || 0) * 100).toFixed(0)}%
+- External Scores JSON: ${JSON.stringify(features.externalDataScores || {})}
 
 ANALYSIS:
 1. Is the market valid? (Check liquidity ${features.liquidity}, volume ${features.volume24h}, expiry ${features.daysUntilExpiry})
 2. What does price action suggest? (Current: ${((features.currentPrice || 0) * 100).toFixed(0)}%, Trend: ${features.trendDirection})
 3. Are smart traders buying or selling? (Whales: ${((features.whaleFactor || 0) * 100).toFixed(0)}%, Smart Money: ${((features.smartMoneyDirection || 0) * 100).toFixed(0)}%)
 4. What's the confidence? (Base on data quality, not sentiment alone)
+5. Is the market probably mispriced vs current market probability (${features.impliedProbability?.toFixed(2) || 0}%)?
 
 Provide ONLY valid JSON response.`;
 };
@@ -310,10 +328,48 @@ const generatePrediction = async (marketData, option, features, timeframe, retry
         prediction.no_probability = prediction.odds.no * 100;
       }
 
+      // Backfill missing yes/no probabilities with the most conservative available signal.
+      const parsedYes = Number(prediction.yes_probability);
+      const parsedNo = Number(prediction.no_probability);
+
+      if (!Number.isFinite(parsedYes) && Number.isFinite(parsedNo)) {
+        prediction.yes_probability = 100 - parsedNo;
+        prediction.no_probability = parsedNo;
+      } else if (Number.isFinite(parsedYes) && !Number.isFinite(parsedNo)) {
+        prediction.no_probability = 100 - parsedYes;
+        prediction.yes_probability = parsedYes;
+      } else if (!Number.isFinite(parsedYes) && !Number.isFinite(parsedNo)) {
+        const direction = String(prediction.prediction || '').toUpperCase();
+        const confidence = clamp(Number(prediction.confidence) || 50, 0, 100);
+
+        if (direction === 'YES') {
+          prediction.yes_probability = confidence;
+          prediction.no_probability = 100 - confidence;
+        } else if (direction === 'NO') {
+          prediction.yes_probability = 100 - confidence;
+          prediction.no_probability = confidence;
+        } else {
+          const implied = clamp(Number(features?.impliedProbability) || 50, 0, 100);
+          prediction.yes_probability = implied;
+          prediction.no_probability = 100 - implied;
+        }
+      }
+
       // Clamp values
       prediction.yes_probability = Math.max(0, Math.min(100, prediction.yes_probability || 0));
       prediction.no_probability = Math.max(0, Math.min(100, prediction.no_probability || 0));
       prediction.confidence = Math.max(0, Math.min(100, prediction.confidence));
+
+      // Normalize optional quality fields if present.
+      if (prediction.marketPredictabilityScore !== undefined) {
+        prediction.marketPredictabilityScore = clamp(Number(prediction.marketPredictabilityScore) || 0, 0, 100);
+      }
+      if (prediction.signalStrengthScore !== undefined) {
+        prediction.signalStrengthScore = clamp(Number(prediction.signalStrengthScore) || 0, 0, 100);
+      }
+      if (prediction.mispricingScore !== undefined) {
+        prediction.mispricingScore = clamp(Number(prediction.mispricingScore) || 0, 0, 100);
+      }
     } else {
       if (!prediction.error) {
         throw new Error('Invalid prediction structure for success=false');

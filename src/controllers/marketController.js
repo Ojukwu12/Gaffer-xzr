@@ -10,6 +10,7 @@ const CustomError = require('../utils/CustomError');
 const polymarketService = require('../services/polymarketService');
 const timeframeService = require('../services/timeframeService');
 const cacheService = require('../services/cacheService');
+const predictionModerationService = require('../services/predictionModerationService');
 const logger = require('../config/logger');
 
 /**
@@ -113,19 +114,29 @@ const getMarketById = asyncHandler(async (req, res) => {
   // Enrich with timeframe data
   const enrichedMarket = timeframeService.enrichMarketWithTimeframes(marketData);
   
-  // Check for cached predictions
+  // Include only approved predictions for public responses.
   const predictions = {};
-  for (const option of enrichedMarket.options || []) {
-    for (const timeframe of enrichedMarket.timeframes.available) {
-      const cached = await cacheService.getPrediction(id, option, timeframe);
-      if (cached) {
-        if (!predictions[option]) predictions[option] = {};
-        predictions[option][timeframe] = {
-          confidence: cached.confidence,
-          reason: cached.reason,
-          timestamp: cached.timestamp
-        };
-      }
+  const PredictionRecord = require('../models/PredictionRecord');
+  const approvedPredictions = await PredictionRecord.find({
+    marketId: id,
+    status: 'approved'
+  }).sort({ approvedAt: -1, updatedAt: -1 });
+
+  for (const approved of approvedPredictions) {
+    if (!predictions[approved.option]) predictions[approved.option] = {};
+    if (!predictions[approved.option][approved.timeframe]) {
+      predictions[approved.option][approved.timeframe] = {
+        confidenceScore: approved.confidence,
+        marketProbabilityAtTime: approved.marketProbabilityAtTime,
+        aiProbability: approved.aiProbability,
+        statement: predictionModerationService.formatProbabilityStatement(
+          approved.marketProbabilityAtTime,
+          approved.aiProbability
+        ),
+        reason: predictionModerationService.resolveDisplayReason(approved),
+        status: approved.status,
+        approvedAt: approved.approvedAt
+      };
     }
   }
   

@@ -223,5 +223,98 @@ router.post('/webhooks/:id/test',
   adminController.testWebhook
 );
 
+/**
+ * GET /api/admin/predictions
+ * List predictions for moderation workflow
+ */
+router.get('/predictions',
+  adminController.listPredictions
+);
+
+/**
+ * POST /api/admin/predictions/:id/approve
+ * Approve a prediction
+ */
+router.post('/predictions/:id/approve',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID'),
+    body('reviewNotes')
+      .optional()
+      .isString()
+      .isLength({ max: 1000 })
+  ],
+  validateRequest,
+  adminController.approvePrediction
+);
+
+/**
+ * POST /api/admin/predictions/:id/reject
+ * Reject a prediction
+ */
+router.post('/predictions/:id/reject',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID'),
+    body('reviewNotes')
+      .optional()
+      .isString()
+      .isLength({ max: 1000 })
+  ],
+  validateRequest,
+  adminController.rejectPrediction
+);
+
+/**
+ * PATCH /api/admin/predictions/:id/probability
+ * Edit AI probability and keep full edit history
+ */
+router.patch('/predictions/:id/probability',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID'),
+    body('aiProbability')
+      .notEmpty()
+      .withMessage('aiProbability is required')
+      .isFloat({ min: 0, max: 100 })
+      .withMessage('aiProbability must be between 0 and 100')
+  ],
+  validateRequest,
+  adminController.editPredictionProbability
+);
+
+  /**
+   * GET /api/admin/external-data/:marketId
+   * Get external data diagnostics for a specific market
+   */
+  router.get('/external-data/:marketId',
+    [
+      param('marketId')
+        .notEmpty()
+        .withMessage('Market ID is required')
+    ],
+    validateRequest,
+    adminController.getExternalDataDiagnostics
+  );
+
+  /**
+   * GET /api/admin/health/external-sources
+   * Check health status of external data providers
+   */
+  router.get('/health/external-sources',
+    adminController.checkExternalSourcesHealth
+  );
+
+  /**
+   * GET /api/admin/metrics/external-data
+   * Get external data performance metrics and statistics
+   */
+  router.get('/metrics/external-data',
+    adminController.getExternalDataMetrics
+  );
+
 module.exports = router;
 

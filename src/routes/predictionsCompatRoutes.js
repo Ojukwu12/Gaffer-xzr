@@ -9,6 +9,26 @@ const predictionController = require('../controllers/predictionController');
 
 const router = express.Router();
 
+// GET /api/predictions/approved
+router.get('/approved', (req, res, next) => {
+  return predictionController.getApprovedPredictions(req, res, next);
+});
+
+// POST /api/predictions/:predictionId/vote
+router.post('/:predictionId/vote',
+  [
+    body('voteType').notEmpty().isIn(['like', 'dislike'])
+  ],
+  (req, res, next) => {
+    return predictionController.votePrediction(req, res, next);
+  }
+);
+
+// GET /api/predictions/:predictionId/votes
+router.get('/:predictionId/votes', (req, res, next) => {
+  return predictionController.getPredictionVotes(req, res, next);
+});
+
 // GET /api/predictions/performance
 // Returns one-month max win-rate summary with correct and incorrect predictions
 router.get('/performance', (req, res, next) => {

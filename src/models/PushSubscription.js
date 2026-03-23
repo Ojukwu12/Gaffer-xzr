@@ -243,7 +243,11 @@ pushSubscriptionSchema.statics.findActiveByMarket = function(marketId) {
   return this.find({
     isActive: true,
     failureCount: { $lt: 5 },
-    'markets.marketId': marketId
+    $or: [
+      { 'markets.marketId': marketId },
+      { markets: { $size: 0 } },
+      { markets: { $exists: false } }
+    ]
   });
 };
 

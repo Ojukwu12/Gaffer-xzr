@@ -12,6 +12,442 @@ const whaleFactorService = require('./whaleFactorService');
 const timeframeService = require('./timeframeService');
 const cacheService = require('./cacheService');
 const predictionTrackingService = require('./predictionTrackingService');
+const externalDataService = require('./externalDataService');
+const externalDataMonitoringService = require('./externalDataMonitoringService');
+const config = require('../config/env');
+
+const PREDICTABILITY_THRESHOLD = config.minPredictabilityScore || 65;
+const CONFIDENCE_THRESHOLD = config.minPredictionConfidence || 70;
+const MIN_PROBABILITY_DIFF = config.minProbabilityDifference || 10;
+const MIN_EXPECTED_EDGE_SCORE = config.minExpectedEdgeScore || 55;
+
+const MARKET_CATEGORIES = {
+  POLITICS: 'politics',
+  SPORTS: 'sports',
+  CRYPTO: 'crypto',
+  TECHNOLOGY: 'technology',
+  GEOPOLITICS: 'geopolitics',
+  GLOBAL_EVENTS: 'global events',
+  FINANCE_ECONOMY: 'finance/economy',
+  CORPORATE: 'corporate',
+  UNPREDICTABLE: 'unpredictable/noise'
+};
+
+const NOISE_TITLE_PATTERNS = [
+  /celebrity/i,
+  /drama/i,
+  /viral/i,
+  /meme/i,
+  /hype/i,
+  /rumou?r/i,
+  /gossip/i,
+  /influencer/i
+];
+
+const CATEGORY_KEYWORDS = {
+  [MARKET_CATEGORIES.POLITICS]: ['election', 'vote', 'senate', 'president', 'prime minister', 'congress', 'ballot', 'campaign', 'incumbent', 'candidate', 'parliament', 'government', 'polling'],
+  [MARKET_CATEGORIES.SPORTS]: ['football', 'soccer', 'basketball', 'nba', 'nfl', 'mlb', 'tennis', 'ufc', 'boxing', 'matchday', 'champions league', 'premier league', 'laliga', 'serie a', 'bundesliga', 'world cup'],
+  [MARKET_CATEGORIES.CRYPTO]: ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'solana', 'token', 'defi', 'altcoin'],
+  [MARKET_CATEGORIES.TECHNOLOGY]: ['apple', 'google', 'microsoft', 'amazon', 'meta', 'nvidia', 'tesla', 'openai', 'launch', 'release', 'iphone', 'ai model', 'chip', 'earnings', 'guidance'],
+  [MARKET_CATEGORIES.GEOPOLITICS]: ['war', 'ceasefire', 'treaty', 'summit', 'conflict', 'invasion', 'sanctions', 'diplomacy', 'border tensions', 'agreement', 'negotiations'],
+  [MARKET_CATEGORIES.GLOBAL_EVENTS]: ['olympics', 'hurricane', 'earthquake', 'climate', 'disaster', 'pandemic', 'natural disaster'],
+  [MARKET_CATEGORIES.FINANCE_ECONOMY]: ['fed', 'interest rate', 'inflation', 'gdp', 'recession', 'unemployment', 'earnings', 'cpi']
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const normalizeScore = (value, maxValue) => {
+  if (!Number.isFinite(value) || maxValue <= 0) return 0;
+  return clamp(value / maxValue, 0, 1);
+};
+
+const classifyMarket = (marketData = {}) => {
+  const title = `${marketData.title || ''} ${marketData.description || ''}`.toLowerCase();
+  const tags = (marketData.categories || []).map((tag) => String(tag).toLowerCase());
+  const text = `${title} ${tags.join(' ')}`;
+
+  if (NOISE_TITLE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return MARKET_CATEGORIES.UNPREDICTABLE;
+  }
+
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some((keyword) => text.includes(keyword))) {
+      return category;
+    }
+  }
+
+  return MARKET_CATEGORIES.UNPREDICTABLE;
+};
+
+const computeSignalStrengthScore = (features = {}) => {
+  // Prioritize strong market signals, downweight weak/noisy components.
+  const historicalPattern = clamp(
+    ((features.historicalAccuracy || 0.5) * 0.6) + normalizeScore(features.marketQualityScore || 0, 100) * 0.4,
+    0,
+    1
+  );
+
+  const days = Number(features.daysUntilExpiry);
+  const timeRemaining = Number.isFinite(days)
+    ? (days >= 2 && days <= 45 ? 1 : days < 2 ? 0.4 : days <= 90 ? 0.75 : 0.5)
+    : 0.5;
+
+  const overreactionScore = clamp(
+    normalizeScore(Math.abs(features.dailyChange || 0), 0.15) * 0.7 +
+      normalizeScore(Math.abs(features.volumeGrowth24h || 0), 120) * 0.3,
+    0,
+    1
+  );
+
+  const liquidityBehavior = clamp(
+    (features.liquidityScore || 0.3) * 0.7 +
+      (1 - Math.min(1, Math.abs((features.liquidityToVolumeRatio || 0) - 0.7))) * 0.3,
+    0,
+    1
+  );
+
+  const organicVsNewsMove = clamp(1 - (features.anomalyScore || 0), 0, 1);
+
+  const volatility = Number(features.priceVolatility || 0.1);
+  const volatilityPattern = volatility >= 0.05 && volatility <= 0.2
+    ? 1
+    : volatility < 0.05
+      ? 0.55
+      : 0.35;
+
+  const externalDataSignal = clamp(
+    normalizeScore(features.externalDataCompositeScore ?? 50, 100) * 0.7 +
+      clamp(features.externalDataSignalStrength ?? 0, 0, 1) * 0.3,
+    0,
+    1
+  );
+
+  const weighted = (
+    historicalPattern * 0.2 +
+    timeRemaining * 0.14 +
+    overreactionScore * 0.14 +
+    liquidityBehavior * 0.14 +
+    organicVsNewsMove * 0.08 +
+    volatilityPattern * 0.08 +
+    externalDataSignal * 0.22
+  );
+
+  return Math.round(clamp(weighted, 0, 1) * 100);
+};
+
+const computeMarketPredictabilityScore = (marketData = {}, features = {}, marketClassification) => {
+  const title = `${marketData.title || ''} ${marketData.description || ''}`;
+  const noisePenalty = NOISE_TITLE_PATTERNS.some((pattern) => pattern.test(title)) ? 0.4 : 0;
+
+  const liquidityScore = normalizeScore(features.liquidity || 0, 100000);
+  const volumeScore = normalizeScore(features.volume24h || 0, 25000);
+  const patternScore = normalizeScore(features.marketQualityScore || 0, 100);
+  const historyAvailability = clamp(
+    (features.marketAge || 0) >= 5 ? 1 : (features.marketAge || 0) / 5,
+    0,
+    1
+  );
+  const signalScore = normalizeScore(features.signalStrengthScore || 0, 100);
+  const externalScore = normalizeScore(features.externalDataCompositeScore ?? 50, 100);
+
+  const categoryBonusMap = {
+    [MARKET_CATEGORIES.POLITICS]: 0.12,
+    [MARKET_CATEGORIES.SPORTS]: 0.11,
+    [MARKET_CATEGORIES.CRYPTO]: 0.1,
+    [MARKET_CATEGORIES.TECHNOLOGY]: 0.08,
+    [MARKET_CATEGORIES.GLOBAL_EVENTS]: 0.07,
+    [MARKET_CATEGORIES.FINANCE_ECONOMY]: 0.1,
+    [MARKET_CATEGORIES.UNPREDICTABLE]: -0.25
+  };
+
+  const baseScore = (
+    liquidityScore * 0.18 +
+    volumeScore * 0.16 +
+    patternScore * 0.2 +
+    historyAvailability * 0.12 +
+    signalScore * 0.18 +
+    externalScore * 0.16
+  );
+
+  const adjusted = baseScore + (categoryBonusMap[marketClassification] || 0) - noisePenalty;
+  return Math.round(clamp(adjusted, 0, 1) * 100);
+};
+
+const computeMispricing = (marketProbability, aiYesProbability) => {
+  const marketProb = Number(marketProbability);
+  const aiProb = Number(aiYesProbability);
+
+  if (!Number.isFinite(marketProb) || !Number.isFinite(aiProb)) {
+    return {
+      differenceBetweenMarketProbabilityAndAI: 0,
+      mispricingScore: 0,
+      mispricingDirection: 'unknown'
+    };
+  }
+
+  const diff = Math.abs(aiProb - marketProb);
+  const direction = aiProb < marketProb ? 'overpriced' : aiProb > marketProb ? 'underpriced' : 'fair';
+
+  return {
+    differenceBetweenMarketProbabilityAndAI: Number(diff.toFixed(2)),
+    mispricingScore: Math.round(clamp(diff / 30, 0, 1) * 100),
+    mispricingDirection: direction
+  };
+};
+
+const getLiquidityBand = (liquidity = 0) => {
+  if (liquidity >= 100000) return 'high';
+  if (liquidity >= 25000) return 'medium';
+  return 'low';
+};
+
+const getExpiryBand = (daysUntilExpiry) => {
+  if (!Number.isFinite(daysUntilExpiry)) return 'unknown';
+  if (daysUntilExpiry <= 2) return 'very_soon';
+  if (daysUntilExpiry <= 14) return 'soon';
+  if (daysUntilExpiry <= 60) return 'mid';
+  return 'far';
+};
+
+const getVolatilityBand = (priceVolatility = 0) => {
+  if (priceVolatility >= 0.2) return 'high';
+  if (priceVolatility >= 0.1) return 'medium';
+  return 'low';
+};
+
+const getMarketBucket = (features = {}, marketClassification = MARKET_CATEGORIES.UNPREDICTABLE) => {
+  return {
+    category: marketClassification,
+    liquidityBand: getLiquidityBand(features.liquidity),
+    expiryBand: getExpiryBand(features.daysUntilExpiry),
+    volatilityBand: getVolatilityBand(features.priceVolatility)
+  };
+};
+
+const computeDynamicThresholds = (bucket) => {
+  const thresholds = {
+    minPredictability: PREDICTABILITY_THRESHOLD,
+    minConfidence: CONFIDENCE_THRESHOLD,
+    minProbabilityDiff: MIN_PROBABILITY_DIFF,
+    minExpectedEdge: MIN_EXPECTED_EDGE_SCORE
+  };
+
+  // Category-level adjustments.
+  if (bucket.category === MARKET_CATEGORIES.POLITICS || bucket.category === MARKET_CATEGORIES.FINANCE_ECONOMY) {
+    thresholds.minConfidence -= 2;
+    thresholds.minProbabilityDiff -= 1;
+  }
+  if (bucket.category === MARKET_CATEGORIES.CRYPTO) {
+    thresholds.minConfidence += 2;
+    thresholds.minProbabilityDiff += 1;
+  }
+  if (bucket.category === MARKET_CATEGORIES.TECHNOLOGY) {
+    thresholds.minProbabilityDiff += 1;
+  }
+  if (bucket.category === MARKET_CATEGORIES.GLOBAL_EVENTS) {
+    thresholds.minPredictability += 1;
+  }
+
+  // Liquidity and volatility risk adjustments.
+  if (bucket.liquidityBand === 'low') {
+    thresholds.minPredictability += 4;
+    thresholds.minConfidence += 4;
+    thresholds.minProbabilityDiff += 3;
+    thresholds.minExpectedEdge += 4;
+  } else if (bucket.liquidityBand === 'medium') {
+    thresholds.minConfidence += 1;
+    thresholds.minProbabilityDiff += 1;
+  }
+
+  if (bucket.volatilityBand === 'high') {
+    thresholds.minConfidence += 2;
+    thresholds.minProbabilityDiff += 2;
+    thresholds.minExpectedEdge += 2;
+  }
+
+  // Resolution windows: very near resolution is noisy unless edge is strong.
+  if (bucket.expiryBand === 'very_soon') {
+    thresholds.minConfidence += 3;
+    thresholds.minProbabilityDiff += 3;
+    thresholds.minExpectedEdge += 3;
+  } else if (bucket.expiryBand === 'far') {
+    thresholds.minPredictability += 2;
+    thresholds.minExpectedEdge += 2;
+  }
+
+  thresholds.minPredictability = clamp(Math.round(thresholds.minPredictability), 55, 95);
+  thresholds.minConfidence = clamp(Math.round(thresholds.minConfidence), 60, 95);
+  thresholds.minProbabilityDiff = clamp(Math.round(thresholds.minProbabilityDiff), 8, 30);
+  thresholds.minExpectedEdge = clamp(Math.round(thresholds.minExpectedEdge), 45, 95);
+
+  return thresholds;
+};
+
+const computeExpectedEdgeScore = ({ mispricing, llmResult, features, gatingContext }) => {
+  const confidence = Number(llmResult.confidence || 0);
+  const liquidityPenalty = features.liquidity < 10000 ? 12 : features.liquidity < 25000 ? 6 : 0;
+  const anomalyPenalty = Math.round((features.anomalyScore || 0) * 10);
+  const timingPenalty = Number.isFinite(features.daysUntilExpiry) && features.daysUntilExpiry <= 1 ? 6 : 0;
+
+  const weightedScore = (
+    mispricing.mispricingScore * 0.42 +
+    confidence * 0.32 +
+    Number(gatingContext.signalStrengthScore || 0) * 0.12 +
+    Number(gatingContext.marketPredictabilityScore || 0) * 0.08 +
+    Number(features.externalDataCompositeScore ?? 50) * 0.06
+  );
+
+  const adjusted = weightedScore - liquidityPenalty - anomalyPenalty - timingPenalty;
+  return clamp(Math.round(adjusted), 0, 100);
+};
+
+const calibrateWithExternalData = (llmResult, features = {}) => {
+  const externalComposite = Number(features.externalDataCompositeScore);
+  const externalStrength = clamp(Number(features.externalDataSignalStrength || 0), 0, 1);
+
+  if (!Number.isFinite(externalComposite) || externalStrength <= 0) {
+    return {
+      ...llmResult,
+      externalDataAdjustment: 0
+    };
+  }
+
+  const directionalBias = clamp((externalComposite - 50) / 50, -1, 1);
+  const maxAdjustment = 12;
+  const adjustment = directionalBias * maxAdjustment * externalStrength;
+  externalDataMonitoringService.recordProbabilityAdjustment(Math.abs(adjustment));
+
+  const calibratedYes = clamp(Number(llmResult.yes_probability || 0) + adjustment, 0, 100);
+  const calibratedNo = clamp(100 - calibratedYes, 0, 100);
+  const calibratedPrediction = calibratedYes >= calibratedNo ? 'YES' : 'NO';
+  const confidenceBoost = Math.abs(adjustment) * 0.75;
+
+  return {
+    ...llmResult,
+    prediction: calibratedPrediction,
+    yes_probability: Number(calibratedYes.toFixed(2)),
+    no_probability: Number(calibratedNo.toFixed(2)),
+    confidence: clamp(Math.round(Number(llmResult.confidence || 0) + confidenceBoost), 0, 100),
+    externalDataAdjustment: Number(adjustment.toFixed(2))
+  };
+};
+
+const ensureMarketIsPredictable = ({ marketData, features }) => {
+  const marketClassification = classifyMarket(marketData);
+  const marketBucket = getMarketBucket(features, marketClassification);
+  const dynamicThresholds = computeDynamicThresholds(marketBucket);
+  const signalStrengthScore = computeSignalStrengthScore(features);
+  const marketPredictabilityScore = computeMarketPredictabilityScore(
+    marketData,
+    { ...features, signalStrengthScore },
+    marketClassification
+  );
+
+  if (marketClassification === MARKET_CATEGORIES.UNPREDICTABLE) {
+    throw new CustomError(
+      'Market classified as unpredictable/noise and skipped for accuracy optimization',
+      422,
+      'MARKET_UNPREDICTABLE',
+      {
+        marketClassification,
+        marketPredictabilityScore,
+        signalStrengthScore,
+        marketBucket,
+        thresholds: dynamicThresholds
+      }
+    );
+  }
+
+  if (marketPredictabilityScore < dynamicThresholds.minPredictability) {
+    throw new CustomError(
+      `Market predictability score ${marketPredictabilityScore}% is below threshold ${dynamicThresholds.minPredictability}%`,
+      422,
+      'MARKET_UNPREDICTABLE',
+      {
+        marketClassification,
+        marketPredictabilityScore,
+        signalStrengthScore,
+        marketBucket,
+        thresholds: dynamicThresholds
+      }
+    );
+  }
+
+  return {
+    marketClassification,
+    marketPredictabilityScore,
+    signalStrengthScore,
+    marketBucket,
+    thresholds: dynamicThresholds
+  };
+};
+
+const enforcePredictionQualityGates = ({ llmResult, features, gatingContext }) => {
+  const thresholds = gatingContext.thresholds || {
+    minConfidence: CONFIDENCE_THRESHOLD,
+    minProbabilityDiff: MIN_PROBABILITY_DIFF,
+    minExpectedEdge: MIN_EXPECTED_EDGE_SCORE
+  };
+
+  if (llmResult.confidence < thresholds.minConfidence) {
+    throw new CustomError(
+      `Prediction confidence ${llmResult.confidence}% is below threshold ${thresholds.minConfidence}%`,
+      422,
+      'PREDICTION_FILTERED_OUT',
+      {
+        ...gatingContext,
+        confidenceScore: llmResult.confidence,
+        thresholds
+      }
+    );
+  }
+
+  const marketProbability = Number(features.impliedProbability || 0);
+  const aiYesProbability = Number(llmResult.yes_probability || 0);
+  const mispricing = computeMispricing(marketProbability, aiYesProbability);
+
+  if (mispricing.differenceBetweenMarketProbabilityAndAI < thresholds.minProbabilityDiff) {
+    throw new CustomError(
+      `AI/market probability difference ${mispricing.differenceBetweenMarketProbabilityAndAI}% is below minimum ${thresholds.minProbabilityDiff}%`,
+      422,
+      'PREDICTION_FILTERED_OUT',
+      {
+        ...gatingContext,
+        confidenceScore: llmResult.confidence,
+        ...mispricing,
+        thresholds
+      }
+    );
+  }
+
+  const expectedEdgeScore = computeExpectedEdgeScore({
+    mispricing,
+    llmResult,
+    features,
+    gatingContext
+  });
+
+  if (expectedEdgeScore < thresholds.minExpectedEdge) {
+    throw new CustomError(
+      `Expected edge score ${expectedEdgeScore}% is below minimum ${thresholds.minExpectedEdge}%`,
+      422,
+      'PREDICTION_FILTERED_OUT',
+      {
+        ...gatingContext,
+        confidenceScore: llmResult.confidence,
+        ...mispricing,
+        expectedEdgeScore,
+        thresholds
+      }
+    );
+  }
+
+  return {
+    ...mispricing,
+    expectedEdgeScore,
+    thresholds
+  };
+};
 
 /**
  * Validates market data before processing
@@ -323,6 +759,31 @@ const computeFeatures = async (marketData, option, timeframe) => {
   features.historicalAccuracy = 0.65;
   features.predictionReliability = features.marketQualityScore > 70 ? 'high' : 
                                     features.marketQualityScore > 50 ? 'medium' : 'low';
+
+  // Strong-signal aggregation used by predictability gate.
+  features.marketClassification = classifyMarket(marketData);
+  const externalDataLayer = await externalDataService.getExternalDataLayer(
+    marketData,
+    features.marketClassification
+  );
+  features.externalDataLayer = externalDataLayer;
+  features.externalDataSourceType = externalDataLayer.sourceType;
+  features.externalDataScores = externalDataLayer.scores || {};
+  features.externalDataCompositeScore = Number.isFinite(externalDataLayer.compositeScore)
+    ? externalDataLayer.compositeScore
+    : 50;
+  features.externalDataSignalStrength = Number.isFinite(externalDataLayer.signalStrength)
+    ? externalDataLayer.signalStrength
+    : 0;
+
+  // Strong-signal aggregation used by predictability gate.
+  features.signalStrengthScore = computeSignalStrengthScore(features);
+  externalDataMonitoringService.recordSignalStrength(features.externalDataSignalStrength);
+  features.marketPredictabilityScore = computeMarketPredictabilityScore(
+    marketData,
+    features,
+    features.marketClassification
+  );
   
   // Enhanced option-specific metrics
   const optionCount = marketData.options?.length || 2;
@@ -363,6 +824,24 @@ const computeFeatures = async (marketData, option, timeframe) => {
  * @returns {number} Anomaly score (0-1)
  */
 const detectAnomalies = (features, marketData) => {
+  // Legacy compatibility path: detectAnomalies(rawMarket) -> array of anomaly objects.
+  if (!marketData && features && Array.isArray(features.options)) {
+    const rawMarket = features;
+    const anomalies = [];
+    const liquidity = rawMarket.liquidity || 0;
+
+    if (liquidity > 0 && liquidity < 1000) {
+      anomalies.push({ type: 'low_liquidity', message: 'Liquidity below threshold' });
+    }
+
+    const sum = rawMarket.options.reduce((total, opt) => total + (opt.price || 0), 0);
+    if (rawMarket.options.length > 0 && Math.abs(sum - 1) > 0.05) {
+      anomalies.push({ type: 'price_sum_anomaly', message: `Option prices sum to ${sum}` });
+    }
+
+    return anomalies;
+  }
+
   let anomalyScore = 0;
   const anomalies = [];
   
@@ -484,6 +963,9 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   
   // Compute all features
   const features = await computeFeatures(marketData, option, timeframe);
+
+  // First gate: skip markets that are likely noise/unpredictable.
+  const gatingContext = ensureMarketIsPredictable({ marketData, features });
   
   // Generate LLM prediction - returns a single YES/NO answer
   const llmResult = await llmService.generatePrediction(
@@ -497,6 +979,14 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     throw new CustomError(llmResult.error, 400, 'INVALID_MARKET_DATA', { details: llmResult.details });
   }
 
+  const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
+
+  const mispricing = enforcePredictionQualityGates({
+    llmResult: calibratedLlmResult,
+    features,
+    gatingContext
+  });
+
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, option);
   const polymarketUrl = polymarketService.getMarketUrl({
@@ -506,12 +996,23 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   
   // Construct final prediction object with the main answer (YES/NO)
   const prediction = {
-    answer: llmResult.prediction, // Main answer: YES or NO
-    confidence: llmResult.confidence,
-    yes_probability: llmResult.yes_probability,
-    no_probability: llmResult.no_probability,
-    reason: llmResult.reason,
-    notes: llmResult.notes,
+    answer: calibratedLlmResult.prediction, // Main answer: YES or NO
+    confidence: calibratedLlmResult.confidence,
+    yes_probability: calibratedLlmResult.yes_probability,
+    no_probability: calibratedLlmResult.no_probability,
+    reason: calibratedLlmResult.reason,
+    notes: calibratedLlmResult.notes,
+    marketClassification: gatingContext.marketClassification,
+    marketPredictabilityScore: gatingContext.marketPredictabilityScore,
+    signalStrengthScore: gatingContext.signalStrengthScore,
+    confidenceScore: calibratedLlmResult.confidence,
+    differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: mispricing.mispricingScore,
+    mispricingDirection: mispricing.mispricingDirection,
+    expectedEdgeScore: mispricing.expectedEdgeScore,
+    externalDataAdjustment: calibratedLlmResult.externalDataAdjustment,
+    marketBucket: gatingContext.marketBucket,
+    thresholdsUsed: mispricing.thresholds,
     features,
     summary: marketSummary,
     polymarketUrl
@@ -540,9 +1041,21 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     option,
     timeframe,
     predictionType: 'option',
+    evaluationMode: config.predictionMode,
     predictedAnswer: prediction.answer,
     confidence: prediction.confidence,
-    reason: prediction.reason
+    reason: prediction.reason,
+    marketClassification: prediction.marketClassification,
+    marketPredictabilityScore: prediction.marketPredictabilityScore,
+    signalStrengthScore: prediction.signalStrengthScore,
+    differenceBetweenMarketProbabilityAndAI: prediction.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: prediction.mispricingScore,
+    mispricingDirection: prediction.mispricingDirection,
+    expectedEdgeScore: prediction.expectedEdgeScore,
+    marketBucket: prediction.marketBucket,
+    thresholdsUsed: prediction.thresholdsUsed,
+    marketProbabilityAtTime: features.impliedProbability,
+    aiProbability: prediction.yes_probability
   });
   
   return {
@@ -600,6 +1113,8 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   
   // Compute all features
   const features = await computeFeatures(marketData, representativeOption, timeframe);
+
+  const gatingContext = ensureMarketIsPredictable({ marketData, features });
   
   // Generate LLM prediction - returns a single YES/NO answer
   const llmResult = await llmService.generatePrediction(
@@ -613,6 +1128,14 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     throw new CustomError(llmResult.error, 400, 'INVALID_MARKET_DATA', { details: llmResult.details });
   }
 
+  const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
+
+  const mispricing = enforcePredictionQualityGates({
+    llmResult: calibratedLlmResult,
+    features,
+    gatingContext
+  });
+
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, representativeOption);
   const polymarketUrl = polymarketService.getMarketUrl({
@@ -622,12 +1145,23 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   
   // Construct final unified prediction object
   const prediction = {
-    answer: llmResult.prediction, // Main answer: YES or NO
-    confidence: llmResult.confidence,
-    yes_probability: llmResult.yes_probability,
-    no_probability: llmResult.no_probability,
-    reason: llmResult.reason,
-    notes: llmResult.notes,
+    answer: calibratedLlmResult.prediction, // Main answer: YES or NO
+    confidence: calibratedLlmResult.confidence,
+    yes_probability: calibratedLlmResult.yes_probability,
+    no_probability: calibratedLlmResult.no_probability,
+    reason: calibratedLlmResult.reason,
+    notes: calibratedLlmResult.notes,
+    marketClassification: gatingContext.marketClassification,
+    marketPredictabilityScore: gatingContext.marketPredictabilityScore,
+    signalStrengthScore: gatingContext.signalStrengthScore,
+    confidenceScore: calibratedLlmResult.confidence,
+    differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: mispricing.mispricingScore,
+    mispricingDirection: mispricing.mispricingDirection,
+    expectedEdgeScore: mispricing.expectedEdgeScore,
+    externalDataAdjustment: calibratedLlmResult.externalDataAdjustment,
+    marketBucket: gatingContext.marketBucket,
+    thresholdsUsed: mispricing.thresholds,
     summary: marketSummary,
     polymarketUrl
   };
@@ -644,9 +1178,21 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     option: representativeOption,
     timeframe,
     predictionType: 'unified',
+    evaluationMode: config.predictionMode,
     predictedAnswer: prediction.answer,
     confidence: prediction.confidence,
-    reason: prediction.reason
+    reason: prediction.reason,
+    marketClassification: prediction.marketClassification,
+    marketPredictabilityScore: prediction.marketPredictabilityScore,
+    signalStrengthScore: prediction.signalStrengthScore,
+    differenceBetweenMarketProbabilityAndAI: prediction.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: prediction.mispricingScore,
+    mispricingDirection: prediction.mispricingDirection,
+    expectedEdgeScore: prediction.expectedEdgeScore,
+    marketBucket: prediction.marketBucket,
+    thresholdsUsed: prediction.thresholdsUsed,
+    marketProbabilityAtTime: features.impliedProbability,
+    aiProbability: prediction.yes_probability
   });
   
   return {
@@ -694,6 +1240,11 @@ const generateAllOptionsPredictions = async (marketId, timeframe = 'daily') => {
  * @returns {Object} Summary object
  */
 const generateMarketSummary = (features, marketData, option) => {
+  // Legacy compatibility path: generateMarketSummary(rawMarket, { liquidityMetrics, volumeMetrics })
+  if (!option && marketData && (marketData.liquidityMetrics || marketData.volumeMetrics)) {
+    return generateMarketSummaryCompat(features, marketData);
+  }
+
   return {
     marketHealth: {
       overallScore: features.marketQualityScore,
@@ -749,7 +1300,13 @@ module.exports = {
   computeFeatures,
   detectAnomalies,
   generateMarketSummary,
-  validateMarketData
+  validateMarketData,
+  classifyMarket,
+  computeMarketPredictabilityScore,
+  computeSignalStrengthScore,
+  computeMispricing,
+  computeExpectedEdgeScore,
+  computeDynamicThresholds
 };
 
 // --- Backwards-compatible helper API expected by older tests/clients ---

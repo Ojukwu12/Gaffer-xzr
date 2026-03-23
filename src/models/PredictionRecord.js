@@ -43,6 +43,36 @@ const predictionRecordSchema = new mongoose.Schema({
     enum: ['option', 'unified'],
     default: 'option'
   },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'expired'],
+    default: 'pending',
+    index: true
+  },
+  reviewedBy: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  reviewNotes: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  approvedAt: {
+    type: Date,
+    default: null
+  },
+  rejectedAt: {
+    type: Date,
+    default: null
+  },
+  evaluationMode: {
+    type: String,
+    enum: ['production', 'paper', 'staging'],
+    default: 'production',
+    index: true
+  },
   predictedAnswer: {
     type: String,
     enum: ['YES', 'NO'],
@@ -53,6 +83,91 @@ const predictionRecordSchema = new mongoose.Schema({
     min: 0,
     max: 100,
     required: true
+  },
+  marketProbabilityAtTime: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  aiProbability: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  aiProbabilityHistory: {
+    type: [Number],
+    default: []
+  },
+  lastEditedAt: {
+    type: Date,
+    default: null
+  },
+  lastEditedBy: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  marketClassification: {
+    type: String,
+    enum: ['politics', 'crypto', 'technology', 'global events', 'finance/economy', 'unpredictable/noise', null],
+    default: null
+  },
+  marketPredictabilityScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  signalStrengthScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  differenceBetweenMarketProbabilityAndAI: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  mispricingScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  mispricingDirection: {
+    type: String,
+    enum: ['overpriced', 'underpriced', 'fair', 'unknown', null],
+    default: null
+  },
+  expectedEdgeScore: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: null
+  },
+  marketBucket: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  thresholdsUsed: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  votes: {
+    totalLikes: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    totalDislikes: {
+      type: Number,
+      default: 0,
+      min: 0
+    }
   },
   reason: {
     type: String,
@@ -84,6 +199,20 @@ const predictionRecordSchema = new mongoose.Schema({
   },
   isCorrect: {
     type: Boolean,
+    default: null,
+    index: true
+  },
+  finalMarketResult: {
+    type: String,
+    enum: ['YES', 'NO', 'TRUE', 'FALSE', null],
+    default: null
+  },
+  isAiCorrect: {
+    type: Boolean,
+    default: null
+  },
+  expiredAt: {
+    type: Date,
     default: null,
     index: true
   }

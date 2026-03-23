@@ -564,3 +564,125 @@ X-RateLimit-Limit: 20
 X-RateLimit-Remaining: 15
 X-RateLimit-Reset: 1701518400
 ```
+
+---
+
+### External Data Observability (Admin, Frontend Dashboard)
+
+These endpoints are intended for admin dashboards, QA tools, and frontend diagnostics pages.
+
+#### GET /api/admin/external-data/:marketId
+Get the external-data diagnostics snapshot for a market that was recently analyzed.
+
+**Headers:**
+- `X-API-Key`: Admin API key
+
+**Path Parameters:**
+- `marketId`: Market ID
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "marketId": "0x123...",
+    "timestamp": "2026-03-23T12:00:00.000Z",
+    "applicable": true,
+    "sourceType": "geopolitical",
+    "scores": {
+      "politicalMomentumScore": 66,
+      "conflictEscalationScore": 41,
+      "diplomaticProgressScore": 58,
+      "narrativeShiftScore": 63
+    },
+    "compositeScore": 57,
+    "signalStrength": 0.78,
+    "sourcesUsed": ["GDELT", "NewsAPI"],
+    "rawContext": {
+      "articlesAnalyzed": 25,
+      "eventsAnalyzed": 18
+    }
+  },
+  "timestamp": "2026-03-23T12:00:00.000Z"
+}
+```
+
+Note: diagnostics are stored in-memory with a TTL and may return 404 if expired.
+
+#### GET /api/admin/health/external-sources
+Check live availability and connectivity of each external source.
+
+**Headers:**
+- `X-API-Key`: Admin API key
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "timestamp": "2026-03-23T12:00:00.000Z",
+    "sources": {
+      "sports": { "status": "healthy", "responseTime": 412, "lastCheck": "2026-03-23T12:00:00.000Z" },
+      "financial": { "status": "healthy", "responseTime": 188, "lastCheck": "2026-03-23T12:00:00.000Z" },
+      "geopolitical": { "status": "unconfigured", "message": "API key not configured", "lastCheck": "2026-03-23T12:00:00.000Z" },
+      "corporate": { "status": "healthy", "responseTime": 229, "lastCheck": "2026-03-23T12:00:00.000Z" }
+    },
+    "summary": {
+      "allHealthy": true,
+      "configuredSources": 3
+    }
+  },
+  "timestamp": "2026-03-23T12:00:00.000Z"
+}
+```
+
+#### GET /api/admin/metrics/external-data
+Get aggregate monitoring metrics for external data usage and quality.
+
+**Headers:**
+- `X-API-Key`: Admin API key
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "timestamp": "2026-03-23T12:00:00.000Z",
+    "metrics": {
+      "apiCalls": {
+        "sports": { "total": 21, "success": 19, "failures": 2, "avgResponseTime": 643, "lastCallTime": "2026-03-23T11:59:41.000Z" },
+        "financial": { "total": 30, "success": 28, "failures": 2, "avgResponseTime": 295, "lastCallTime": "2026-03-23T11:59:50.000Z" },
+        "geopolitical": { "total": 11, "success": 9, "failures": 2, "avgResponseTime": 704, "lastCallTime": "2026-03-23T11:58:10.000Z" },
+        "corporate": { "total": 8, "success": 8, "failures": 0, "avgResponseTime": 387, "lastCallTime": "2026-03-23T11:57:32.000Z" }
+      },
+      "cache": {
+        "hits": 44,
+        "misses": 26,
+        "hitRate": 0.6285
+      },
+      "probabilityAdjustments": {
+        "totalAdjustments": 38,
+        "avgAdjustmentMagnitude": 3.97,
+        "adjustmentRange": { "min": 0.4, "max": 10.2 }
+      },
+      "sourceHealth": {
+        "sports": { "healthy": true, "lastCheckTime": "2026-03-23T12:00:00.000Z", "lastErrorTime": null },
+        "financial": { "healthy": true, "lastCheckTime": "2026-03-23T12:00:00.000Z", "lastErrorTime": null },
+        "geopolitical": { "healthy": false, "lastCheckTime": "2026-03-23T12:00:00.000Z", "lastErrorTime": "2026-03-23T11:56:20.000Z" },
+        "corporate": { "healthy": true, "lastCheckTime": "2026-03-23T12:00:00.000Z", "lastErrorTime": null }
+      },
+      "signalStrength": {
+        "avg": 0.61,
+        "distribution": { "high": 14, "medium": 11, "low": 9, "none": 4 }
+      }
+    },
+    "diagnosticsStored": 67
+  },
+  "timestamp": "2026-03-23T12:00:00.000Z"
+}
+```
+
+Frontend guidance:
+- Poll `GET /api/admin/metrics/external-data` every 30-60 seconds for dashboard cards.
+- Trigger `GET /api/admin/health/external-sources` on load and on-demand refresh.
+- Use `GET /api/admin/external-data/:marketId` in market detail QA views.

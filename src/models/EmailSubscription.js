@@ -195,7 +195,11 @@ emailSubscriptionSchema.statics.findActiveByMarket = function(marketId) {
   return this.find({
     isActive: true,
     isVerified: true,
-    'markets.marketId': marketId
+    $or: [
+      { 'markets.marketId': marketId },
+      { markets: { $size: 0 } },
+      { markets: { $exists: false } }
+    ]
   });
 };
 

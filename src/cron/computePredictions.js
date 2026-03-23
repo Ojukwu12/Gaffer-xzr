@@ -8,27 +8,32 @@ const { connectDB, closeDB } = require('../config/db');
 const logger = require('../config/logger');
 const polymarketService = require('../services/polymarketService');
 const predictionEngine = require('../services/predictionEngine');
-const notificationService = require('../services/notificationService');
+const predictionModerationService = require('../services/predictionModerationService');
 const cacheService = require('../services/cacheService');
-const config = require('../config/env');
 
 /**
  * Main computation function
  */
-const computePredictions = async () => {
+const computePredictions = async (options = {}) => {
   logger.info('Starting prediction computation job');
   
   const startTime = Date.now();
   let processedCount = 0;
   let successCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
+  const skippedReasons = {};
   const notifications = [];
+  let expiredCleanup = { scanned: 0, expired: 0 };
   
   try {
     // Connect to database if not in server context
     if (!require('mongoose').connection.readyState) {
       await connectDB();
     }
+
+    // Keep lifecycle integrity: move ended markets to expired status with outcomes.
+    expiredCleanup = await predictionModerationService.markExpiredPredictions({ limit: 1000 });
     
     // Fetch active markets
     let markets = await polymarketService.fetchMarkets({ closed: false });
@@ -90,19 +95,21 @@ const computePredictions = async () => {
               `Prediction computed: ${parsedMarket.marketId} (${timeframe}) - ${prediction.confidence}%`
             );
             
-            // Queue for notifications if confidence is high enough
-            if (prediction.confidence >= 70) {
-              notifications.push({
-                marketId: parsedMarket.marketId,
-                prediction,
-                marketData: parsedMarket
-              });
-            }
-            
             // Add small delay to avoid rate limits
             await new Promise(resolve => setTimeout(resolve, 100));
             
           } catch (predError) {
+            if (predError.errorCode === 'MARKET_UNPREDICTABLE' || predError.errorCode === 'PREDICTION_FILTERED_OUT') {
+              skippedCount++;
+              const reasonKey = predError.errorCode === 'MARKET_UNPREDICTABLE' ? 'unpredictable_market' : 'quality_gate_filtered';
+              skippedReasons[reasonKey] = (skippedReasons[reasonKey] || 0) + 1;
+              logger.info(
+                `Prediction skipped for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`,
+                predError.details || {}
+              );
+              continue;
+            }
+
             logger.error(
               `Failed to compute prediction for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`
             );
@@ -116,19 +123,11 @@ const computePredictions = async () => {
       }
     }
     
-    // Send notifications for high-confidence predictions
+    // Do not auto-publish prediction notifications here.
+    // Notifications are triggered only when an admin approves a prediction.
     let notificationResults = { email: { sent: 0 }, push: { sent: 0 } };
-    
     if (notifications.length > 0) {
-      logger.info(`Sending notifications for ${notifications.length} predictions`);
-      
-      try {
-        const bulkResults = await notificationService.sendBulkNotifications(notifications);
-        notificationResults = bulkResults.summary;
-        logger.info('Notifications sent:', notificationResults);
-      } catch (notifError) {
-        logger.error(`Failed to send notifications: ${notifError.message}`);
-      }
+      logger.info('Notification dispatch skipped: predictions require admin approval before publishing');
     }
     
     // Clear expired cache entries
@@ -140,7 +139,10 @@ const computePredictions = async () => {
       success: true,
       processed: processedCount,
       successful: successCount,
+      skipped: skippedCount,
+      skippedReasons,
       failed: failedCount,
+      expiredCleanup,
       notifications: notificationResults,
       duration
     };

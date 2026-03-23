@@ -7,6 +7,9 @@
 const PredictionRecord = require('../models/PredictionRecord');
 const polymarketService = require('./polymarketService');
 const logger = require('../config/logger');
+const config = require('../config/env');
+
+const TARGET_WIN_RATE = Number(config.minWinRateLowerBound || 51);
 
 const normalizeYesNo = (value) => {
   if (!value) return null;
@@ -79,24 +82,128 @@ const recordPrediction = async (payload) => {
     option: payload.option,
     timeframe: payload.timeframe,
     predictionType: payload.predictionType || 'option',
+    status: payload.status || 'pending',
+    evaluationMode: payload.evaluationMode || config.predictionMode || 'production',
     predictedAnswer: payload.predictedAnswer,
     confidence: payload.confidence,
+    marketProbabilityAtTime: payload.marketProbabilityAtTime ?? null,
+    aiProbability: payload.aiProbability ?? null,
+    aiProbabilityHistory: Number.isFinite(payload.aiProbability) ? [payload.aiProbability] : [],
+    marketClassification: payload.marketClassification || null,
+    marketPredictabilityScore: payload.marketPredictabilityScore ?? null,
+    signalStrengthScore: payload.signalStrengthScore ?? null,
+    differenceBetweenMarketProbabilityAndAI: payload.differenceBetweenMarketProbabilityAndAI ?? null,
+    mispricingScore: payload.mispricingScore ?? null,
+    mispricingDirection: payload.mispricingDirection || null,
+    expectedEdgeScore: payload.expectedEdgeScore ?? null,
+    marketBucket: payload.marketBucket || null,
+    thresholdsUsed: payload.thresholdsUsed || null,
     reason: payload.reason,
     predictedAt: new Date()
   });
 };
 
-const getPredictionPerformance = async (days = 30) => {
+const computeWilsonLowerBound = (wins, total, z = 1.96) => {
+  if (!total || total <= 0) return 0;
+
+  const phat = wins / total;
+  const z2 = z * z;
+  const denominator = 1 + z2 / total;
+  const center = phat + z2 / (2 * total);
+  const margin = z * Math.sqrt((phat * (1 - phat) + z2 / (4 * total)) / total);
+  return Math.max(0, ((center - margin) / denominator) * 100);
+};
+
+const buildConfidenceCalibration = (resolvedRecords) => {
+  const bins = [
+    { min: 0, max: 59, key: '0-59' },
+    { min: 60, max: 69, key: '60-69' },
+    { min: 70, max: 79, key: '70-79' },
+    { min: 80, max: 89, key: '80-89' },
+    { min: 90, max: 100, key: '90-100' }
+  ];
+
+  const stats = bins.map((bin) => ({
+    ...bin,
+    total: 0,
+    correct: 0,
+    avgConfidence: 0,
+    observedWinRate: 0,
+    calibrationGap: 0
+  }));
+
+  for (const record of resolvedRecords) {
+    const confidence = Number(record.confidence || 0);
+    const match = stats.find((bin) => confidence >= bin.min && confidence <= bin.max);
+    if (!match) continue;
+    match.total += 1;
+    if (record.isCorrect) match.correct += 1;
+    match.avgConfidence += confidence;
+  }
+
+  for (const bin of stats) {
+    if (bin.total === 0) continue;
+    bin.avgConfidence = Number((bin.avgConfidence / bin.total).toFixed(2));
+    bin.observedWinRate = Number(((bin.correct / bin.total) * 100).toFixed(2));
+    bin.calibrationGap = Number((bin.observedWinRate - bin.avgConfidence).toFixed(2));
+  }
+
+  return stats;
+};
+
+const buildBucketBreakdown = (resolvedRecords) => {
+  const bucketMap = new Map();
+
+  for (const record of resolvedRecords) {
+    const bucketKey = record.marketClassification || 'unknown';
+    if (!bucketMap.has(bucketKey)) {
+      bucketMap.set(bucketKey, {
+        bucket: bucketKey,
+        total: 0,
+        correct: 0,
+        avgConfidence: 0,
+        avgExpectedEdgeScore: 0,
+        winRate: 0
+      });
+    }
+
+    const bucket = bucketMap.get(bucketKey);
+    bucket.total += 1;
+    if (record.isCorrect) bucket.correct += 1;
+    bucket.avgConfidence += Number(record.confidence || 0);
+    bucket.avgExpectedEdgeScore += Number(record.expectedEdgeScore || 0);
+  }
+
+  const result = [];
+  for (const bucket of bucketMap.values()) {
+    bucket.avgConfidence = Number((bucket.avgConfidence / Math.max(1, bucket.total)).toFixed(2));
+    bucket.avgExpectedEdgeScore = Number((bucket.avgExpectedEdgeScore / Math.max(1, bucket.total)).toFixed(2));
+    bucket.winRate = Number(((bucket.correct / Math.max(1, bucket.total)) * 100).toFixed(2));
+    result.push(bucket);
+  }
+
+  return result.sort((a, b) => b.winRate - a.winRate);
+};
+
+const getPredictionPerformance = async (days = 30, options = {}) => {
   const windowDays = Math.min(30, Math.max(1, Number(days) || 30));
   const cutoffDate = new Date(Date.now() - (windowDays * 24 * 60 * 60 * 1000));
+  const evaluationMode = options.evaluationMode || null;
 
-  const records = await PredictionRecord.find({
+  const query = {
     predictedAt: { $gte: cutoffDate }
-  }).sort({ predictedAt: -1 });
+  };
+
+  if (evaluationMode) {
+    query.evaluationMode = evaluationMode;
+  }
+
+  const records = await PredictionRecord.find(query).sort({ predictedAt: -1 });
 
   if (records.length === 0) {
     return {
       windowDays,
+      evaluationMode: evaluationMode || 'all',
       summary: {
         totalPredictions: 0,
         resolvedPredictions: 0,
@@ -184,7 +291,10 @@ const getPredictionPerformance = async (days = 30) => {
       option: record.option,
       predictedAnswer: record.predictedAnswer,
       actualAnswer: correctness.actualAnswer,
+      isCorrect: correctness.isCorrect,
       confidence: record.confidence,
+      marketClassification: record.marketClassification || null,
+      expectedEdgeScore: record.expectedEdgeScore ?? null,
       predictedAt: record.predictedAt,
       resolvedAt: new Date(),
       winningOption,
@@ -207,15 +317,43 @@ const getPredictionPerformance = async (days = 30) => {
     ? Number(((correctPredictions.length / resolvedCount) * 100).toFixed(2))
     : 0;
 
+  const resolvedRecords = [...correctPredictions, ...incorrectPredictions];
+  const wilsonLowerBound = Number(computeWilsonLowerBound(correctPredictions.length, resolvedCount).toFixed(2));
+  const targetMet = wilsonLowerBound >= TARGET_WIN_RATE;
+  const confidenceCalibration = buildConfidenceCalibration(resolvedRecords);
+  const categoryBreakdown = buildBucketBreakdown(resolvedRecords);
+
   return {
     windowDays,
+    evaluationMode: evaluationMode || 'all',
+    scoreDefinition: {
+      denominator: 'resolved_predictions_only',
+      numerator: 'correct_resolved_predictions',
+      binaryOutcomes: true,
+      metric: 'win_rate',
+      targetLowerBound: TARGET_WIN_RATE
+    },
     summary: {
       totalPredictions: records.length,
       resolvedPredictions: resolvedCount,
       pendingPredictions: pendingPredictions.length,
       correctPredictions: correctPredictions.length,
       incorrectPredictions: incorrectPredictions.length,
-      winRate
+      winRate,
+      wilsonLowerBound,
+      targetMet
+    },
+    confidenceInterval: {
+      method: 'wilson_95',
+      lowerBound: wilsonLowerBound,
+      target: TARGET_WIN_RATE,
+      targetMet
+    },
+    calibration: {
+      bins: confidenceCalibration
+    },
+    breakdowns: {
+      byCategory: categoryBreakdown
     },
     correctPredictions,
     incorrectPredictions,
@@ -223,7 +361,49 @@ const getPredictionPerformance = async (days = 30) => {
   };
 };
 
+const getProductionReadiness = async ({
+  days = 30,
+  evaluationMode = 'paper',
+  minResolved = config.readinessMinResolved || 100,
+  minLowerBound = config.minWinRateLowerBound || 51
+} = {}) => {
+  const performance = await getPredictionPerformance(days, { evaluationMode });
+  const resolvedPredictions = Number(performance?.summary?.resolvedPredictions || 0);
+  const wilsonLowerBound = Number(performance?.summary?.wilsonLowerBound || 0);
+  const pointWinRate = Number(performance?.summary?.winRate || 0);
+
+  const enoughSamples = resolvedPredictions >= Number(minResolved);
+  const passesLowerBound = wilsonLowerBound >= Number(minLowerBound);
+  const ready = enoughSamples && passesLowerBound;
+
+  const reasons = [];
+  if (!enoughSamples) {
+    reasons.push(`Need at least ${minResolved} resolved predictions in ${evaluationMode} mode (currently ${resolvedPredictions}).`);
+  }
+  if (!passesLowerBound) {
+    reasons.push(`Wilson 95% lower bound ${wilsonLowerBound}% is below target ${minLowerBound}%.`);
+  }
+
+  return {
+    ready,
+    checks: {
+      evaluationMode,
+      windowDays: Math.min(30, Math.max(1, Number(days) || 30)),
+      minResolved: Number(minResolved),
+      minLowerBound: Number(minLowerBound),
+      resolvedPredictions,
+      pointWinRate,
+      wilsonLowerBound,
+      enoughSamples,
+      passesLowerBound
+    },
+    reasons,
+    performance
+  };
+};
+
 module.exports = {
   recordPrediction,
-  getPredictionPerformance
+  getPredictionPerformance,
+  getProductionReadiness
 };

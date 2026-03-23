@@ -19,6 +19,24 @@ const config = {
   
   // Polymarket API
   polymarketApiBase: process.env.POLYMARKET_API_BASE || 'https://gamma-api.polymarket.com',
+
+  // External Data APIs (sports + financial)
+  sportsDataIoApiKey: process.env.SPORTSDATAIO_API_KEY || '',
+  sportsDataIoBaseUrl: process.env.SPORTSDATAIO_BASE_URL || 'https://api.sportsdata.io',
+  footballDataApiKey: process.env.FOOTBALL_DATA_API_KEY || '',
+  footballDataBaseUrl: process.env.FOOTBALL_DATA_BASE_URL || 'https://api.football-data.org/v4',
+  coinGeckoBaseUrl: process.env.COINGECKO_BASE_URL || 'https://api.coingecko.com/api/v3',
+  yahooFinanceBaseUrl: process.env.YAHOO_FINANCE_BASE_URL || 'https://query1.finance.yahoo.com',
+  
+  // External Data APIs (geopolitical + corporate)
+  gdeltApiKey: process.env.GDELT_API_KEY || '',
+  gdeltBaseUrl: process.env.GDELT_BASE_URL || 'https://api.gdeltproject.org',
+  newsApiKey: process.env.NEWS_API_KEY || '',
+  earningsApiKey: process.env.EARNINGS_API_KEY || '',
+  earningsApiBase: process.env.EARNINGS_API_BASE || 'https://api.example.com/earnings',
+  secEdgarApiBase: process.env.SEC_EDGAR_API_BASE || 'https://data.sec.gov/api/xbrl',
+  
+  externalDataCacheTtl: parseInt(process.env.EXTERNAL_DATA_CACHE_TTL || '900', 10),
   
   // LLM Configuration (Primary: Gemini Pro)
   // Support both LLM_API_KEY and GEMINI_API_KEY for flexibility
@@ -56,6 +74,16 @@ const config = {
   marketsPerCategory: parseInt(process.env.MARKETS_PER_CATEGORY || '1', 10),
   minLiquidityUsd: parseInt(process.env.MIN_LIQUIDITY_USD || '1000', 10),
   minVolume24hUsd: parseInt(process.env.MIN_VOLUME_24H_USD || '100', 10),
+  minPredictabilityScore: parseInt(process.env.MIN_PREDICTABILITY_SCORE || '65', 10),
+  minPredictionConfidence: parseInt(process.env.MIN_PREDICTION_CONFIDENCE || '70', 10),
+  minProbabilityDifference: parseInt(process.env.MIN_PROBABILITY_DIFFERENCE || '10', 10),
+  minExpectedEdgeScore: parseInt(process.env.MIN_EXPECTED_EDGE_SCORE || '55', 10),
+  minWinRateLowerBound: parseInt(process.env.MIN_WIN_RATE_LOWER_BOUND || '51', 10),
+  predictionMode: process.env.PREDICTION_MODE || 'production',
+  readinessMinResolved: parseInt(process.env.READINESS_MIN_RESOLVED || '100', 10),
+  readinessWindowDays: parseInt(process.env.READINESS_WINDOW_DAYS || '30', 10),
+  readinessMode: process.env.READINESS_MODE || 'paper',
+  enforceProductionReadiness: String(process.env.ENFORCE_PRODUCTION_READINESS || 'false').toLowerCase() === 'true',
   
   // LLM Rate Limiting & Retry
   llmMaxRetries: parseInt(process.env.LLM_MAX_RETRIES || '3', 10),
