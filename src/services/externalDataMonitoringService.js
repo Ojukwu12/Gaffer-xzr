@@ -7,6 +7,7 @@
 const logger = require('../config/logger');
 const axios = require('axios');
 const config = require('../config/env');
+const externalApiRateLimiter = require('./externalApiRateLimiter');
 
 /**
  * Metrics store for external data operations
@@ -210,10 +211,12 @@ async function checkExternalSourceHealth() {
     const startTime = Date.now();
     // Simple connectivity check - just see if we can reach the API
     if (config.sportsDataIoApiKey && config.sportsDataIoApiKey !== 'your_sportsdata_api_key') {
-      await axios.get('https://api.sportsdataio.com/v3/nba/scores/json/teams', {
-        params: { key: config.sportsDataIoApiKey },
-        timeout: 5000
-      });
+      await externalApiRateLimiter.schedule('sportsDataIo', () =>
+        axios.get('https://api.sportsdataio.com/v3/nba/scores/json/teams', {
+          params: { key: config.sportsDataIoApiKey },
+          timeout: 5000
+        })
+      );
       const responseTime = Date.now() - startTime;
       healthCheck.sources.sports = {
         status: 'healthy',
@@ -242,10 +245,12 @@ async function checkExternalSourceHealth() {
   // Check financial data (CoinGecko - public API, no key required)
   try {
     const startTime = Date.now();
-    await axios.get('https://api.coingecko.com/api/v3/simple/price', {
-      params: { ids: 'bitcoin', vs_currencies: 'usd' },
-      timeout: 5000
-    });
+    await externalApiRateLimiter.schedule('coinGecko', () =>
+      axios.get('https://api.coingecko.com/api/v3/simple/price', {
+        params: { ids: 'bitcoin', vs_currencies: 'usd' },
+        timeout: 5000
+      })
+    );
     const responseTime = Date.now() - startTime;
     healthCheck.sources.financial = {
       status: 'healthy',
@@ -268,14 +273,16 @@ async function checkExternalSourceHealth() {
   try {
     const startTime = Date.now();
     if (config.newsApiKey && config.newsApiKey !== 'your_newsapi_key') {
-      await axios.get('https://newsapi.org/v2/everything', {
-        params: {
-          q: 'politics',
-          pageSize: 1,
-          apiKey: config.newsApiKey
-        },
-        timeout: 5000
-      });
+      await externalApiRateLimiter.schedule('newsApi', () =>
+        axios.get('https://newsapi.org/v2/everything', {
+          params: {
+            q: 'politics',
+            pageSize: 1,
+            apiKey: config.newsApiKey
+          },
+          timeout: 5000
+        })
+      );
       const responseTime = Date.now() - startTime;
       healthCheck.sources.geopolitical = {
         status: 'healthy',
@@ -305,13 +312,15 @@ async function checkExternalSourceHealth() {
   try {
     const startTime = Date.now();
     const secUrl = `${config.secEdgarApiBase}/companyfacts/CIK0000320193.json`;
-    await axios.get(secUrl, {
-      headers: {
-        'User-Agent': 'Polyscope/1.0 (ops@polyscope.local)',
-        Accept: 'application/json'
-      },
-      timeout: 5000
-    });
+    await externalApiRateLimiter.schedule('secEdgar', () =>
+      axios.get(secUrl, {
+        headers: {
+          'User-Agent': 'Polyscope/1.0 (ops@polyscope.local)',
+          Accept: 'application/json'
+        },
+        timeout: 5000
+      })
+    );
     const responseTime = Date.now() - startTime;
     healthCheck.sources.corporate = {
       status: 'healthy',

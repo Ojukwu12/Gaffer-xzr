@@ -147,7 +147,7 @@ docs/API_DOCUMENTATION.md  # API reference
 
 ### Production Features
 - **Caching System**: Hybrid in-memory + MongoDB
-- **Rate Limiting**: General (100/15min) + Prediction (20/15min)
+- **Rate Limiting**: General (100/5min) + Prediction (50/5min) + Sensitive (20/5min) + outbound provider pacing
 - **Authentication**: JWT-based with role-based access
 - **Security**: CORS, Helmet, input validation, request timeouts
 - **Monitoring**: Metrics endpoint, Winston logging

@@ -8,6 +8,7 @@ const axios = require('axios');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const cacheService = require('./cacheService');
+const externalApiRateLimiter = require('./externalApiRateLimiter');
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const toNumber = (value, fallback = 0) => {
@@ -78,13 +79,15 @@ const fetchGDELTEvents = async () => {
       headers: { 'Authorization': `Bearer ${config.gdeltApiKey}` }
     });
 
-    const response = await client.get('/events', {
-      params: {
-        limit: 100,
-        sort: 'date',
-        format: 'json'
-      }
-    });
+    const response = await externalApiRateLimiter.schedule('gdelt', () =>
+      client.get('/events', {
+        params: {
+          limit: 100,
+          sort: 'date',
+          format: 'json'
+        }
+      })
+    );
 
     return response.data?.events || [];
   } catch (error) {
@@ -102,15 +105,17 @@ const fetchNewsArticles = async (query) => {
       timeout: 12000
     });
 
-    const response = await client.get('/everything', {
-      params: {
-        q: query,
-        sortBy: 'publishedAt',
-        language: 'en',
-        pageSize: 50,
-        apiKey: config.newsApiKey
-      }
-    });
+    const response = await externalApiRateLimiter.schedule('newsApi', () =>
+      client.get('/everything', {
+        params: {
+          q: query,
+          sortBy: 'publishedAt',
+          language: 'en',
+          pageSize: 50,
+          apiKey: config.newsApiKey
+        }
+      })
+    );
 
     return response.data?.articles || [];
   } catch (error) {

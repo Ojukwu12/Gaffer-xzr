@@ -554,14 +554,16 @@ Get system metrics
 
 ## Rate Limiting
 
-- **General endpoints**: 100 requests per 15 minutes per IP
-- **Prediction endpoints**: 20 predictions per 15 minutes per IP
-- **Admin endpoints**: 50 requests per 15 minutes per API key
+- **General endpoints**: 100 requests per 5 minutes per IP
+- **Prediction endpoints**: 50 prediction requests per 5 minutes per IP
+- **Admin/sensitive endpoints**: 20 requests per 5 minutes per IP
+
+External API adapters also apply outbound provider-specific pacing (SportsDataIO, Football-Data, CoinGecko, Yahoo Finance, GDELT, NewsAPI, SEC EDGAR, and Earnings API) to reduce upstream throttling risk.
 
 Rate limit headers are included in responses:
 ```
-X-RateLimit-Limit: 20
-X-RateLimit-Remaining: 15
+X-RateLimit-Limit: 50
+X-RateLimit-Remaining: 35
 X-RateLimit-Reset: 1701518400
 ```
 

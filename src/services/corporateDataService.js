@@ -8,6 +8,7 @@ const axios = require('axios');
 const logger = require('../config/logger');
 const config = require('../config/env');
 const cacheService = require('./cacheService');
+const externalApiRateLimiter = require('./externalApiRateLimiter');
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const toNumber = (value, fallback = 0) => {
@@ -82,7 +83,9 @@ const fetchSECFilings = async (ticker) => {
       }
     });
 
-    const response = await client.get(`/companyfacts/CIK${ticker}.json`).catch(() => null);
+    const response = await externalApiRateLimiter.schedule('secEdgar', () =>
+      client.get(`/companyfacts/CIK${ticker}.json`)
+    ).catch(() => null);
     if (!response?.data) return null;
 
     return response.data;
@@ -102,9 +105,11 @@ const fetchEarningsCalendar = async (ticker) => {
       headers: { 'Authorization': `Bearer ${config.earningsApiKey}` }
     });
 
-    const response = await client.get(`/calendar`, {
-      params: { ticker, limit: 5 }
-    });
+    const response = await externalApiRateLimiter.schedule('earningsApi', () =>
+      client.get(`/calendar`, {
+        params: { ticker, limit: 5 }
+      })
+    );
 
     return response.data?.results || [];
   } catch (error) {
@@ -123,15 +128,17 @@ const fetchProductReleases = async (companyName) => {
       timeout: 12000
     });
 
-    const response = await client.get('/everything', {
-      params: {
-        q: newsUrl,
-        sortBy: 'publishedAt',
-        language: 'en',
-        pageSize: 20,
-        apiKey: config.newsApiKey
-      }
-    });
+    const response = await externalApiRateLimiter.schedule('newsApi', () =>
+      client.get('/everything', {
+        params: {
+          q: newsUrl,
+          sortBy: 'publishedAt',
+          language: 'en',
+          pageSize: 20,
+          apiKey: config.newsApiKey
+        }
+      })
+    );
 
     return response.data?.articles || [];
   } catch (error) {

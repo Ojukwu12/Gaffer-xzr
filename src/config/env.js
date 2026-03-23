@@ -89,6 +89,16 @@ const config = {
   llmMaxRetries: parseInt(process.env.LLM_MAX_RETRIES || '3', 10),
   llmRetryDelayMs: parseInt(process.env.LLM_RETRY_DELAY_MS || '1000', 10),
   llmRateLimitThreshold: parseInt(process.env.LLM_RATE_LIMIT_THRESHOLD || '3', 10),
+
+  // Outbound external API rate limiting (minimum interval between provider calls)
+  sportsDataIoMinIntervalMs: parseInt(process.env.SPORTSDATAIO_MIN_INTERVAL_MS || '300', 10),
+  footballDataMinIntervalMs: parseInt(process.env.FOOTBALL_DATA_MIN_INTERVAL_MS || '500', 10),
+  coinGeckoMinIntervalMs: parseInt(process.env.COINGECKO_MIN_INTERVAL_MS || '1200', 10),
+  yahooFinanceMinIntervalMs: parseInt(process.env.YAHOO_FINANCE_MIN_INTERVAL_MS || '400', 10),
+  gdeltMinIntervalMs: parseInt(process.env.GDELT_MIN_INTERVAL_MS || '600', 10),
+  newsApiMinIntervalMs: parseInt(process.env.NEWS_API_MIN_INTERVAL_MS || '800', 10),
+  secEdgarMinIntervalMs: parseInt(process.env.SEC_EDGAR_MIN_INTERVAL_MS || '500', 10),
+  earningsApiMinIntervalMs: parseInt(process.env.EARNINGS_API_MIN_INTERVAL_MS || '500', 10),
   
   // Rate Limit Bypass
   devIp: process.env.DEV_IP || '127.0.0.1'

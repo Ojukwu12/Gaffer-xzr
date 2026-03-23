@@ -11,6 +11,7 @@ const cacheService = require('./cacheService');
 const geopoliticalDataService = require('./geopoliticalDataService');
 const corporateDataService = require('./corporateDataService');
 const externalDataMonitoringService = require('./externalDataMonitoringService');
+const externalApiRateLimiter = require('./externalApiRateLimiter');
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const toNumber = (value, fallback = 0) => {
@@ -248,7 +249,7 @@ const fetchSportsDataIoData = async ({ teamA, teamB, sportType }) => {
   const results = [];
   for (const endpoint of tryRequests) {
     try {
-      const response = await client.get(endpoint);
+      const response = await externalApiRateLimiter.schedule('sportsDataIo', () => client.get(endpoint));
       results.push({ endpoint, data: response.data });
     } catch (error) {
       logger.debug('SportsDataIO endpoint failed', { endpoint, error: error.message });
@@ -278,7 +279,9 @@ const resolveFootballDataTeam = async (client, teamName) => {
   if (!teamName) return null;
 
   try {
-    const response = await client.get('/teams', { params: { name: teamName } });
+    const response = await externalApiRateLimiter.schedule('footballData', () =>
+      client.get('/teams', { params: { name: teamName } })
+    );
     const teams = response.data?.teams || [];
     return teams[0] || null;
   } catch (error) {
@@ -322,8 +325,12 @@ const fetchFootballDataSnapshot = async ({ teamA, teamB }) => {
   const teamBObj = teamB ? await resolveFootballDataTeam(client, teamB) : null;
 
   const [recentResponse, fixtureResponse] = await Promise.all([
-    client.get(`/teams/${teamAObj.id}/matches`, { params: { status: 'FINISHED', limit: 5 } }).catch(() => ({ data: {} })),
-    client.get(`/teams/${teamAObj.id}/matches`, { params: { status: 'SCHEDULED', limit: 3 } }).catch(() => ({ data: {} }))
+    externalApiRateLimiter.schedule('footballData', () =>
+      client.get(`/teams/${teamAObj.id}/matches`, { params: { status: 'FINISHED', limit: 5 } })
+    ).catch(() => ({ data: {} })),
+    externalApiRateLimiter.schedule('footballData', () =>
+      client.get(`/teams/${teamAObj.id}/matches`, { params: { status: 'SCHEDULED', limit: 3 } })
+    ).catch(() => ({ data: {} }))
   ]);
 
   const recentMatches = (recentResponse.data?.matches || []).map((m) => mapFootballDataMatch(m, teamAObj.id));
@@ -468,17 +475,21 @@ const fetchCoinGeckoData = async (coinId) => {
   });
 
   const [chartResponse, coinResponse] = await Promise.all([
-    client.get(`/coins/${coinId}/market_chart`, { params: { vs_currency: 'usd', days: 30 } }).catch(() => ({ data: {} })),
-    client.get(`/coins/${coinId}`, {
-      params: {
-        localization: false,
-        tickers: false,
-        market_data: true,
-        community_data: false,
-        developer_data: false,
-        sparkline: false
-      }
-    }).catch(() => ({ data: {} }))
+    externalApiRateLimiter.schedule('coinGecko', () =>
+      client.get(`/coins/${coinId}/market_chart`, { params: { vs_currency: 'usd', days: 30 } })
+    ).catch(() => ({ data: {} })),
+    externalApiRateLimiter.schedule('coinGecko', () =>
+      client.get(`/coins/${coinId}`, {
+        params: {
+          localization: false,
+          tickers: false,
+          market_data: true,
+          community_data: false,
+          developer_data: false,
+          sparkline: false
+        }
+      })
+    ).catch(() => ({ data: {} }))
   ]);
 
   const prices = (chartResponse.data?.prices || []).map((p) => toNumber(Array.isArray(p) ? p[1] : p));
@@ -499,13 +510,15 @@ const fetchYahooFinanceData = async (ticker) => {
   if (!ticker) return null;
 
   try {
-    const response = await axios.get(`${config.yahooFinanceBaseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}`, {
-      timeout: 12000,
-      params: {
-        range: '1mo',
-        interval: '1d'
-      }
-    });
+    const response = await externalApiRateLimiter.schedule('yahooFinance', () =>
+      axios.get(`${config.yahooFinanceBaseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}`, {
+        timeout: 12000,
+        params: {
+          range: '1mo',
+          interval: '1d'
+        }
+      })
+    );
 
     const quote = response.data?.chart?.result?.[0]?.indicators?.quote?.[0] || {};
     const prices = quote.close || [];
