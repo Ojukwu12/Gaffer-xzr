@@ -9,11 +9,12 @@ const router = express.Router();
 const { body, param } = require('express-validator');
 const adminController = require('../controllers/adminController');
 const { strictLimiter } = require('../middlewares/rateLimit');
-const { requireApiKey, requireAdmin } = require('../middlewares/auth');
+const { requireApiKey, requireAdmin, requireAdminSecretKey } = require('../middlewares/auth');
 const asyncHandler = require('../middlewares/asyncHandler');
 const validateRequest = require('../middlewares/validateRequest');
 
 // Apply authentication and rate limiting to all admin routes
+router.use(asyncHandler(requireAdminSecretKey));
 router.use(asyncHandler(requireApiKey));
 router.use(asyncHandler(requireAdmin));
 router.use(strictLimiter);

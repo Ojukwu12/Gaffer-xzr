@@ -9,6 +9,7 @@ const router = express.Router();
 const { body, query, param } = require('express-validator');
 const predictionController = require('../controllers/predictionController');
 const { predictionLimiter } = require('../middlewares/rateLimit');
+const validateRequest = require('../middlewares/validateRequest');
 
 // Apply prediction-specific rate limiting
 router.use(predictionLimiter);
@@ -22,7 +23,8 @@ router.get('/:id/predict-unified',
     param('id').notEmpty().withMessage('Market ID is required').trim(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
-  predictionController.getUnifiedPrediction
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 /**
@@ -35,7 +37,8 @@ router.get('/:id/predict',
     query('option').notEmpty().withMessage('Option is required').trim(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
-  predictionController.getPrediction
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 /**
@@ -47,7 +50,8 @@ router.get('/:id/predict-all',
     param('id').notEmpty().withMessage('Market ID is required').trim(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
-  predictionController.getAllPredictions
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 /**
@@ -60,7 +64,8 @@ router.get('/:id/features',
     query('option').notEmpty().withMessage('Option is required').trim(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
-  predictionController.getFeatures
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 /**
@@ -71,7 +76,8 @@ router.get('/:id/cache',
   [
     param('id').notEmpty().withMessage('Market ID is required').trim()
   ],
-  predictionController.getCachedPredictions
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 /**
@@ -93,7 +99,8 @@ router.post('/batch',
       .optional()
       .isIn(['daily', 'weekly', 'monthly'])
   ],
-  predictionController.batchPredict
+  validateRequest,
+  predictionController.rejectPublicPredictionGeneration
 );
 
 module.exports = router;

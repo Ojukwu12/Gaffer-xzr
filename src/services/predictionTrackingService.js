@@ -6,6 +6,8 @@
 
 const PredictionRecord = require('../models/PredictionRecord');
 const polymarketService = require('./polymarketService');
+const mlCorrectionService = require('./mlCorrectionService');
+const mlTrainingDataService = require('./mlTrainingDataService');
 const logger = require('../config/logger');
 const config = require('../config/env');
 
@@ -74,6 +76,12 @@ const evaluateCorrectness = (record, winningOption) => {
 };
 
 const recordPrediction = async (payload) => {
+  const probabilityHistory = Array.isArray(payload.aiProbabilityHistory)
+    ? payload.aiProbabilityHistory
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+    : [];
+
   await PredictionRecord.create({
     marketId: payload.marketId,
     marketTitle: payload.marketTitle,
@@ -88,7 +96,9 @@ const recordPrediction = async (payload) => {
     confidence: payload.confidence,
     marketProbabilityAtTime: payload.marketProbabilityAtTime ?? null,
     aiProbability: payload.aiProbability ?? null,
-    aiProbabilityHistory: Number.isFinite(payload.aiProbability) ? [payload.aiProbability] : [],
+    aiProbabilityHistory: probabilityHistory.length > 0
+      ? probabilityHistory
+      : (Number.isFinite(payload.aiProbability) ? [payload.aiProbability] : []),
     marketClassification: payload.marketClassification || null,
     marketPredictabilityScore: payload.marketPredictabilityScore ?? null,
     signalStrengthScore: payload.signalStrengthScore ?? null,
@@ -281,6 +291,26 @@ const getPredictionPerformance = async (days = 30, options = {}) => {
             isCorrect: correctness.isCorrect
           }
         }
+      }
+    });
+
+    const resolvedRecord = {
+      ...record.toObject(),
+      actualAnswer: correctness.actualAnswer,
+      isCorrect: correctness.isCorrect
+    };
+
+    try {
+      await mlTrainingDataService.storeTrainingEntry(resolvedRecord, 'performance_sync');
+    } catch (error) {
+      logger.warn(`ML training data storage skipped for ${record._id}: ${error.message}`);
+    }
+
+    setImmediate(() => {
+      try {
+        mlCorrectionService.trainFromResolvedPrediction(resolvedRecord);
+      } catch (error) {
+        logger.warn(`ML correction training skipped for ${record._id}: ${error.message}`);
       }
     });
 

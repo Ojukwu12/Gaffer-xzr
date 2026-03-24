@@ -68,6 +68,9 @@ const config = {
   
   // Notification Configuration
   notificationThreshold: parseInt(process.env.NOTIFICATION_THRESHOLD || '10', 10),
+
+  // Lightweight admin secret header for sensitive admin actions
+  adminSecretKey: process.env.ADMIN_SECRET_KEY || '',
   
   // Prediction Engine Configuration
   maxMarketsPerRun: parseInt(process.env.MAX_MARKETS_PER_RUN || '20', 10),
@@ -84,6 +87,30 @@ const config = {
   readinessWindowDays: parseInt(process.env.READINESS_WINDOW_DAYS || '30', 10),
   readinessMode: process.env.READINESS_MODE || 'paper',
   enforceProductionReadiness: String(process.env.ENFORCE_PRODUCTION_READINESS || 'false').toLowerCase() === 'true',
+
+  // Timing security: jitter job execution and publication windows
+  predictionCronJitterMinMs: parseInt(process.env.PREDICTION_CRON_JITTER_MIN_MS || '120000', 10),
+  predictionCronJitterMaxMs: parseInt(process.env.PREDICTION_CRON_JITTER_MAX_MS || '600000', 10),
+  refreshCronJitterMinMs: parseInt(process.env.REFRESH_CRON_JITTER_MIN_MS || '30000', 10),
+  refreshCronJitterMaxMs: parseInt(process.env.REFRESH_CRON_JITTER_MAX_MS || '180000', 10),
+  predictionPublishDelayMinMs: parseInt(process.env.PREDICTION_PUBLISH_DELAY_MIN_MS || '120000', 10),
+  predictionPublishDelayMaxMs: parseInt(process.env.PREDICTION_PUBLISH_DELAY_MAX_MS || '480000', 10),
+
+  // Internal ML correction layer (post-AI probability adjustment)
+  mlCorrectionEnabled: process.env.ML_CORRECTION_ENABLED || 'true',
+  mlCorrectionLearningRate: parseFloat(process.env.ML_CORRECTION_LEARNING_RATE || '0.03'),
+  mlCorrectionMaxAdjustment: parseInt(process.env.ML_CORRECTION_MAX_ADJUSTMENT || '6', 10),
+  mlCorrectionMinSamples: parseInt(process.env.ML_CORRECTION_MIN_SAMPLES || '40', 10),
+  mlCorrectionBlendMax: parseFloat(process.env.ML_CORRECTION_BLEND_MAX || '0.35'),
+  mlCorrectionModelPath: process.env.ML_CORRECTION_MODEL_PATH || '',
+  mlCorrectionConfidenceThreshold: parseFloat(process.env.ML_CORRECTION_CONFIDENCE_THRESHOLD || '0.6'),
+  mlCorrectionMinLiquidityUsd: parseInt(process.env.ML_CORRECTION_MIN_LIQUIDITY_USD || '1000', 10),
+  mlCorrectionMaxVolatility: parseFloat(process.env.ML_CORRECTION_MAX_VOLATILITY || '0.35'),
+  mlCorrectionCategoryModelsEnabled: process.env.ML_CORRECTION_CATEGORY_MODELS_ENABLED || 'true',
+  mlCorrectionRetrainEveryN: parseInt(process.env.ML_CORRECTION_RETRAIN_EVERY_N || '20', 10),
+  mlCorrectionRetrainWindowDays: parseInt(process.env.ML_CORRECTION_RETRAIN_WINDOW_DAYS || '180', 10),
+  mlCorrectionRetrainMaxSamples: parseInt(process.env.ML_CORRECTION_RETRAIN_MAX_SAMPLES || '3000', 10),
+  mlCorrectionEpochs: parseInt(process.env.ML_CORRECTION_EPOCHS || '4', 10),
   
   // LLM Rate Limiting & Retry
   llmMaxRetries: parseInt(process.env.LLM_MAX_RETRIES || '3', 10),
@@ -99,6 +126,20 @@ const config = {
   newsApiMinIntervalMs: parseInt(process.env.NEWS_API_MIN_INTERVAL_MS || '800', 10),
   secEdgarMinIntervalMs: parseInt(process.env.SEC_EDGAR_MIN_INTERVAL_MS || '500', 10),
   earningsApiMinIntervalMs: parseInt(process.env.EARNINGS_API_MIN_INTERVAL_MS || '500', 10),
+
+  // Vote integrity and anti-manipulation controls
+  voteCooldownMs: parseInt(process.env.VOTE_COOLDOWN_MS || '60000', 10),
+  voteReliableSampleSize: parseInt(process.env.VOTE_RELIABLE_SAMPLE_SIZE || '20', 10),
+  voteBurstWindowMs: parseInt(process.env.VOTE_BURST_WINDOW_MS || '300000', 10),
+  voteBurstThreshold: parseInt(process.env.VOTE_BURST_THRESHOLD || '40', 10),
+  voteBurstMaxSingleIpShare: parseFloat(process.env.VOTE_BURST_MAX_SINGLE_IP_SHARE || '0.6'),
+  voteNewAccountDays: parseInt(process.env.VOTE_NEW_ACCOUNT_DAYS || '7', 10),
+  voteRecentAccountDays: parseInt(process.env.VOTE_RECENT_ACCOUNT_DAYS || '30', 10),
+  voteNewAccountWeight: parseFloat(process.env.VOTE_NEW_ACCOUNT_WEIGHT || '0.5'),
+  voteRecentAccountWeight: parseFloat(process.env.VOTE_RECENT_ACCOUNT_WEIGHT || '0.8'),
+  voteVelocitySpikeWeight: parseFloat(process.env.VOTE_VELOCITY_SPIKE_WEIGHT || '0.7'),
+  voteIpConcentrationWeight: parseFloat(process.env.VOTE_IP_CONCENTRATION_WEIGHT || '0.5'),
+  voteMinWeight: parseFloat(process.env.VOTE_MIN_WEIGHT || '0.3'),
   
   // Rate Limit Bypass
   devIp: process.env.DEV_IP || '127.0.0.1'

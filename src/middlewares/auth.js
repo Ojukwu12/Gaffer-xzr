@@ -7,6 +7,7 @@
 const CustomError = require('../utils/CustomError');
 const logger = require('../config/logger');
 const User = require('../models/User');
+const config = require('../config/env');
 
 /**
  * Validates API key from request headers
@@ -67,6 +68,32 @@ const requireAdmin = async (req, res, next) => {
 };
 
 /**
+ * Validates lightweight admin secret key header for sensitive admin endpoints
+ * @param {Object} req - Express request
+ * @param {Object} res - Express response
+ * @param {Function} next - Express next function
+ */
+const requireAdminSecretKey = async (req, res, next) => {
+  if (!config.adminSecretKey) {
+    logger.error('ADMIN_SECRET_KEY is not configured');
+    throw new CustomError('Admin secret key is not configured', 500, 'ADMIN_SECRET_NOT_CONFIGURED');
+  }
+
+  const providedSecret = req.header('x-admin-key');
+
+  if (!providedSecret || providedSecret !== config.adminSecretKey) {
+    logger.warn('Invalid admin secret key attempt', {
+      ip: req.ip,
+      path: req.path
+    });
+
+    throw new CustomError('Invalid admin key', 403, 'INVALID_ADMIN_KEY');
+  }
+
+  next();
+};
+
+/**
  * Checks user tier limits
  * @param {string} feature - Feature to check
  * @returns {Function} Middleware function
@@ -100,5 +127,6 @@ const checkTierLimit = (feature) => {
 module.exports = {
   requireApiKey,
   requireAdmin,
+  requireAdminSecretKey,
   checkTierLimit
 };

@@ -100,8 +100,29 @@ const predictionLimiter = rateLimit({
   }
 });
 
+/**
+ * Vote endpoint rate limiter
+ * 20 vote submissions per 5 minutes per IP
+ */
+const voteLimiter = rateLimit({
+  windowMs: RATE_LIMIT_CONFIG.windowMs,
+  max: 20,
+  standardHeaders: RATE_LIMIT_CONFIG.standardHeaders,
+  legacyHeaders: RATE_LIMIT_CONFIG.legacyHeaders,
+  handler,
+  skip,
+  keyGenerator: (req) => req.ip || req.connection.remoteAddress,
+  message: {
+    success: false,
+    message: 'Too many vote submissions, please slow down',
+    errorCode: 'VOTE_RATE_LIMIT_EXCEEDED',
+    timestamp: new Date().toISOString()
+  }
+});
+
 module.exports = {
   generalLimiter,
   strictLimiter,
-  predictionLimiter
+  predictionLimiter,
+  voteLimiter
 };

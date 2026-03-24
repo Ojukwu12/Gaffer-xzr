@@ -140,117 +140,63 @@ Get details for a specific market
 
 ### Predictions
 
-#### GET /api/markets/:id/predict
-Generate prediction for a specific option
+Prediction generation is private and runs only in backend scheduled/background processes.
 
-**Parameters:**
-- `id`: Market ID
+The following public read routes are supported for frontend consumption of already-generated records:
+
+#### GET /api/predictions
+List approved prediction records
 
 **Query Parameters:**
-- `option`: Option to predict (e.g., "Yes", "No")
-- `timeframe` (optional, default: "daily"): Prediction timeframe ("daily", "weekly", "monthly")
+- `timeframe` (optional): `daily`, `weekly`, `monthly`
+- `limit` (optional, default: 50)
+- `offset` (optional, default: 0)
 
 **Response:**
 ```json
 {
   "success": true,
   "data": {
-    "answer": "YES",
-    "marketId": "0x123...",
-    "option": "Yes",
-    "timeframe": "daily",
-    "confidence": 75,
-    "yes_probability": 65,
-    "no_probability": 35,
-    "polymarketUrl": "https://polymarket.com/event/some-market-slug",
-    "reason": "Strong positive sentiment + rising liquidity + bullish trend",
-    "notes": "Market quality grade: B. No critical warnings.",
-    "summary": {
-      "marketHealth": {
-        "overallScore": 75,
-        "grade": "B",
-        "status": "valid",
-        "issues": []
-      },
-      "keyMetrics": {
-        "liquidity": {
-          "value": 150000,
-          "formatted": "$150,000",
-          "score": 0.8,
-          "risk": "LOW"
-        },
-        "volume24h": {
-          "value": 45000,
-          "formatted": "$45,000",
-          "growth": 25.5,
-          "trend": "increasing"
-        },
-        "currentPrice": {
-          "value": 0.65,
-          "formatted": "$0.6500",
-          "impliedProbability": "65.00%",
-          "rank": 1,
-          "isLeading": true
-        }
-      },
-      "sentiment": {
-        "score": 0.72,
-        "label": "positive",
-        "trend": "bullish",
-        "strength": "strong"
-      },
-      "risks": {
-        "overall": "medium",
-        "score": 0.35,
-        "warnings": []
-      },
-      "timing": {
-        "marketAge": "30 days",
-        "daysUntilExpiry": "7 days",
-        "lifecycleStage": "late_stage",
-        "urgency": "high"
-      }
-    },
-    "features": { ... },
-    "timestamp": "2025-12-02T10:30:00.000Z",
-    "fromCache": false,
-    "computationTime": 1250
-  }
-}
-```
-
-#### GET /api/markets/:id/predict-all
-Generate predictions for all options in a market
-
-**Parameters:**
-- `id`: Market ID
-
-**Query Parameters:**
-- `timeframe` (optional, default: "daily"): Prediction timeframe
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "marketId": "0x123...",
+    "total": 2,
+    "count": 2,
     "predictions": [
       {
-        "option": "Yes",
-        "answer": "YES",
-        "confidence": 74,
-        "polymarketUrl": "https://polymarket.com/event/some-market-slug"
-      },
-      {
-        "option": "No",
-        "answer": "NO",
-        "confidence": 71,
-        "polymarketUrl": "https://polymarket.com/event/some-market-slug"
+        "id": "65fabc1234def56789012345",
+        "marketId": "0x123...",
+        "status": "approved",
+        "marketProbability": 40,
+        "aiProbability": 30,
+        "confidence": "high"
       }
     ]
   }
 }
 ```
+
+#### GET /api/predictions/:predictionId
+Get a single approved prediction record
+
+**Parameters:**
+- `predictionId`: MongoDB prediction record ID
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "65fabc1234def56789012345",
+    "marketId": "0x123...",
+    "status": "approved",
+    "marketProbability": 40,
+    "aiProbability": 30,
+    "confidence": "high"
+  }
+}
+```
+
+Security note:
+- Public generation-style routes are blocked by design.
+- Prediction engine internals, external-source logic, and model features are not exposed in public responses.
 
 #### GET /api/predictions/performance
 Get prediction performance for frontend dashboards (max 30 days).

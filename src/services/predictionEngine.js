@@ -14,6 +14,7 @@ const cacheService = require('./cacheService');
 const predictionTrackingService = require('./predictionTrackingService');
 const externalDataService = require('./externalDataService');
 const externalDataMonitoringService = require('./externalDataMonitoringService');
+const mlCorrectionService = require('./mlCorrectionService');
 const config = require('../config/env');
 
 const PREDICTABILITY_THRESHOLD = config.minPredictabilityScore || 65;
@@ -329,6 +330,52 @@ const calibrateWithExternalData = (llmResult, features = {}) => {
     no_probability: Number(calibratedNo.toFixed(2)),
     confidence: clamp(Math.round(Number(llmResult.confidence || 0) + confidenceBoost), 0, 100),
     externalDataAdjustment: Number(adjustment.toFixed(2))
+  };
+};
+
+const applyMlCorrectionLayer = (llmResult, features = {}, gatingContext = {}) => {
+  const correction = mlCorrectionService.applyCorrection({
+    aiProbability: Number(llmResult.yes_probability || 0),
+    marketProbability: Number(features.impliedProbability || 50),
+    daysUntilExpiry: Number(features.daysUntilExpiry),
+    marketClassification: gatingContext.marketClassification || features.marketClassification,
+    confidence: Number(llmResult.confidence || 50),
+    historicalAccuracy: mlCorrectionService.getCategoryAccuracy(
+      gatingContext.marketClassification || features.marketClassification
+    ),
+    marketPredictabilityScore: Number(gatingContext.marketPredictabilityScore || features.marketPredictabilityScore || 50),
+    signalStrengthScore: Number(gatingContext.signalStrengthScore || features.signalStrengthScore || 50),
+    expiryBand: features.marketBucket?.expiryBand,
+    liquidity: Number(features.liquidity || 0),
+    priceVolatility: Number(features.priceVolatility || 0),
+    suspiciousSignals: Array.isArray(features.suspiciousSignals) ? features.suspiciousSignals : []
+  });
+
+  const correctedYes = Number(correction.correctedProbability);
+  const correctedNo = clamp(100 - correctedYes, 0, 100);
+
+  // Fire-and-forget correction observability logging.
+  void mlCorrectionService.logCorrectionDecision({
+    marketId: features.marketId,
+    timeframe: features.timeframe || 'daily',
+    marketCategory: gatingContext.marketClassification || features.marketClassification,
+    externalAiProbability: Number(llmResult.yes_probability || 0),
+    correctedProbability: correctedYes,
+    adjustmentAmount: Number(correction.adjustment || 0),
+    modelConfidence: Number(correction.modelConfidence || 0),
+    applied: Boolean(correction.applied),
+    reason: correction.reason || 'applied'
+  });
+
+  return {
+    ...llmResult,
+    prediction: correctedYes >= correctedNo ? 'YES' : 'NO',
+    yes_probability: Number(correctedYes.toFixed(2)),
+    no_probability: Number(correctedNo.toFixed(2)),
+    mlCorrectionAdjustment: Number(correction.adjustment || 0),
+    mlModelProbability: Number(correction.modelProbability || correctedYes),
+    mlModelConfidence: Number(correction.modelConfidence || 0),
+    mlCorrectionApplied: Boolean(correction.applied)
   };
 };
 
@@ -963,6 +1010,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   
   // Compute all features
   const features = await computeFeatures(marketData, option, timeframe);
+  features.marketId = marketId;
+  features.timeframe = timeframe;
 
   // First gate: skip markets that are likely noise/unpredictable.
   const gatingContext = ensureMarketIsPredictable({ marketData, features });
@@ -980,9 +1029,10 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   }
 
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
+  const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
 
   const mispricing = enforcePredictionQualityGates({
-    llmResult: calibratedLlmResult,
+    llmResult: correctedLlmResult,
     features,
     gatingContext
   });
@@ -996,21 +1046,23 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   
   // Construct final prediction object with the main answer (YES/NO)
   const prediction = {
-    answer: calibratedLlmResult.prediction, // Main answer: YES or NO
-    confidence: calibratedLlmResult.confidence,
-    yes_probability: calibratedLlmResult.yes_probability,
-    no_probability: calibratedLlmResult.no_probability,
-    reason: calibratedLlmResult.reason,
-    notes: calibratedLlmResult.notes,
+    answer: correctedLlmResult.prediction, // Main answer: YES or NO
+    confidence: correctedLlmResult.confidence,
+    yes_probability: correctedLlmResult.yes_probability,
+    no_probability: correctedLlmResult.no_probability,
+    reason: correctedLlmResult.reason,
+    notes: correctedLlmResult.notes,
     marketClassification: gatingContext.marketClassification,
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
-    confidenceScore: calibratedLlmResult.confidence,
+    confidenceScore: correctedLlmResult.confidence,
     differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
     mispricingScore: mispricing.mispricingScore,
     mispricingDirection: mispricing.mispricingDirection,
     expectedEdgeScore: mispricing.expectedEdgeScore,
-    externalDataAdjustment: calibratedLlmResult.externalDataAdjustment,
+    externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
+    mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
+    mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
     thresholdsUsed: mispricing.thresholds,
     features,
@@ -1055,7 +1107,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     marketBucket: prediction.marketBucket,
     thresholdsUsed: prediction.thresholdsUsed,
     marketProbabilityAtTime: features.impliedProbability,
-    aiProbability: prediction.yes_probability
+    aiProbability: prediction.yes_probability,
+    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability]
   });
   
   return {
@@ -1113,6 +1166,8 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   
   // Compute all features
   const features = await computeFeatures(marketData, representativeOption, timeframe);
+  features.marketId = marketId;
+  features.timeframe = timeframe;
 
   const gatingContext = ensureMarketIsPredictable({ marketData, features });
   
@@ -1129,9 +1184,10 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   }
 
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
+  const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
 
   const mispricing = enforcePredictionQualityGates({
-    llmResult: calibratedLlmResult,
+    llmResult: correctedLlmResult,
     features,
     gatingContext
   });
@@ -1145,21 +1201,23 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   
   // Construct final unified prediction object
   const prediction = {
-    answer: calibratedLlmResult.prediction, // Main answer: YES or NO
-    confidence: calibratedLlmResult.confidence,
-    yes_probability: calibratedLlmResult.yes_probability,
-    no_probability: calibratedLlmResult.no_probability,
-    reason: calibratedLlmResult.reason,
-    notes: calibratedLlmResult.notes,
+    answer: correctedLlmResult.prediction, // Main answer: YES or NO
+    confidence: correctedLlmResult.confidence,
+    yes_probability: correctedLlmResult.yes_probability,
+    no_probability: correctedLlmResult.no_probability,
+    reason: correctedLlmResult.reason,
+    notes: correctedLlmResult.notes,
     marketClassification: gatingContext.marketClassification,
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
-    confidenceScore: calibratedLlmResult.confidence,
+    confidenceScore: correctedLlmResult.confidence,
     differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
     mispricingScore: mispricing.mispricingScore,
     mispricingDirection: mispricing.mispricingDirection,
     expectedEdgeScore: mispricing.expectedEdgeScore,
-    externalDataAdjustment: calibratedLlmResult.externalDataAdjustment,
+    externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
+    mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
+    mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
     thresholdsUsed: mispricing.thresholds,
     summary: marketSummary,
@@ -1192,7 +1250,8 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     marketBucket: prediction.marketBucket,
     thresholdsUsed: prediction.thresholdsUsed,
     marketProbabilityAtTime: features.impliedProbability,
-    aiProbability: prediction.yes_probability
+    aiProbability: prediction.yes_probability,
+    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability]
   });
   
   return {

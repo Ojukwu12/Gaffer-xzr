@@ -19,6 +19,13 @@ const { sanitizeInput, blockSuspiciousRequests } = require('./middlewares/securi
 const timeout = require('./middlewares/timeout');
 const metricsService = require('./services/metricsService');
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const randomBetween = (minMs, maxMs) => {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
 // Import routes
 const marketRoutes = require('./routes/marketRoutes');
 const predictionRoutes = require('./routes/predictionRoutes');
@@ -126,7 +133,8 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       markets: '/api/markets',
-      predictions: '/api/markets/:id/predict',
+      predictions: '/api/predictions',
+      predictionById: '/api/predictions/:predictionId',
       notifications: '/api/notifications',
       admin: '/api/admin'
     },
@@ -149,28 +157,53 @@ app.use(errorHandler);
  */
 const setupCronJobs = () => {
   logger.info('⏰ Setting up automatic cron jobs...');
+
+  let refreshInProgress = false;
+  let predictionInProgress = false;
   
   // Refresh markets every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
+    if (refreshInProgress) {
+      logger.info('Skipping scheduled market refresh: previous run still in progress');
+      return;
+    }
+
+    refreshInProgress = true;
+    const refreshDelayMs = randomBetween(config.refreshCronJitterMinMs, config.refreshCronJitterMaxMs);
+
     try {
-      logger.info('Running scheduled market refresh...');
+      logger.info(`Running scheduled market refresh with randomized delay (${refreshDelayMs}ms)...`);
+      await sleep(refreshDelayMs);
       const refreshMarkets = require('./cron/refreshMarkets');
       await refreshMarkets();
       global.lastCronRun = new Date().toISOString();
     } catch (error) {
       logger.error('Scheduled market refresh failed:', error.message);
+    } finally {
+      refreshInProgress = false;
     }
   });
   
   // Compute predictions every 10 minutes
   cron.schedule('*/10 * * * *', async () => {
+    if (predictionInProgress) {
+      logger.info('Skipping scheduled prediction computation: previous run still in progress');
+      return;
+    }
+
+    predictionInProgress = true;
+    const predictionDelayMs = randomBetween(config.predictionCronJitterMinMs, config.predictionCronJitterMaxMs);
+
     try {
-      logger.info('Running scheduled prediction computation...');
+      logger.info(`Running scheduled prediction computation with randomized delay (${predictionDelayMs}ms)...`);
+      await sleep(predictionDelayMs);
       const computePredictions = require('./cron/computePredictions');
       await computePredictions();
       global.lastCronRun = new Date().toISOString();
     } catch (error) {
       logger.error('Scheduled prediction computation failed:', error.message);
+    } finally {
+      predictionInProgress = false;
     }
   });
   

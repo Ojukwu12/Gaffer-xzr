@@ -7,8 +7,34 @@
 const crypto = require('crypto');
 const PredictionRecord = require('../models/PredictionRecord');
 const PredictionVote = require('../models/PredictionVote');
+const User = require('../models/User');
 const polymarketService = require('./polymarketService');
+const mlCorrectionService = require('./mlCorrectionService');
+const mlTrainingDataService = require('./mlTrainingDataService');
 const logger = require('../config/logger');
+const config = require('../config/env');
+const CustomError = require('../utils/CustomError');
+
+const VOTE_COOLDOWN_MS = Number(config.voteCooldownMs || 60000);
+const VOTE_RELIABLE_SAMPLE_SIZE = Number(config.voteReliableSampleSize || 20);
+const VOTE_BURST_WINDOW_MS = Number(config.voteBurstWindowMs || 300000);
+const VOTE_BURST_THRESHOLD = Number(config.voteBurstThreshold || 40);
+const VOTE_BURST_MAX_SINGLE_IP_SHARE = Number(config.voteBurstMaxSingleIpShare || 0.6);
+const VOTE_NEW_ACCOUNT_DAYS = Number(config.voteNewAccountDays || 7);
+const VOTE_RECENT_ACCOUNT_DAYS = Number(config.voteRecentAccountDays || 30);
+const VOTE_NEW_ACCOUNT_WEIGHT = Number(config.voteNewAccountWeight || 0.5);
+const VOTE_RECENT_ACCOUNT_WEIGHT = Number(config.voteRecentAccountWeight || 0.8);
+const VOTE_VELOCITY_SPIKE_WEIGHT = Number(config.voteVelocitySpikeWeight || 0.7);
+const VOTE_IP_CONCENTRATION_WEIGHT = Number(config.voteIpConcentrationWeight || 0.5);
+const VOTE_MIN_WEIGHT = Number(config.voteMinWeight || 0.3);
+const PUBLISH_DELAY_MIN_MS = Number(config.predictionPublishDelayMinMs || 120000);
+const PUBLISH_DELAY_MAX_MS = Number(config.predictionPublishDelayMaxMs || 480000);
+
+const getRandomDelayMs = (minMs, maxMs) => {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
 
 const clampProbability = (value) => {
   const n = Number(value);
@@ -41,7 +67,8 @@ const findLatestApprovedPrediction = async ({ marketId, option, timeframe = 'dai
     marketId,
     timeframe,
     predictionType,
-    status: 'approved'
+    status: 'approved',
+    approvedAt: { $lte: new Date() }
   };
 
   if (option) {
@@ -56,7 +83,8 @@ const findApprovedPredictionsForMarket = async ({ marketId, timeframe = 'daily' 
     marketId,
     timeframe,
     predictionType: 'option',
-    status: 'approved'
+    status: 'approved',
+    approvedAt: { $lte: new Date() }
   }).sort({ approvedAt: -1, updatedAt: -1 });
 };
 
@@ -82,13 +110,19 @@ const approvePrediction = async ({ predictionId, reviewedBy, reviewNotes = '' })
   const record = await PredictionRecord.findById(predictionId);
   if (!record) return null;
 
+  const publicationDelayMs = getRandomDelayMs(PUBLISH_DELAY_MIN_MS, PUBLISH_DELAY_MAX_MS);
+
   record.status = 'approved';
   record.reviewedBy = reviewedBy || 'admin';
   record.reviewNotes = reviewNotes;
-  record.approvedAt = new Date();
+  record.approvedAt = new Date(Date.now() + publicationDelayMs);
 
   await record.save();
-  return record;
+
+  return {
+    record,
+    publicationDelayMs
+  };
 };
 
 const rejectPrediction = async ({ predictionId, reviewedBy, reviewNotes = '' }) => {
@@ -131,15 +165,136 @@ const editAiProbability = async ({ predictionId, aiProbability, editedBy }) => {
   return record;
 };
 
+const hashRawValue = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
+
 const buildDeviceHash = ({ deviceId, ipAddress, userAgent }) => {
   const raw = deviceId && String(deviceId).trim().length > 0
     ? `device:${String(deviceId).trim()}`
     : `network:${ipAddress || 'unknown'}:${userAgent || 'unknown'}`;
 
-  return crypto.createHash('sha256').update(raw).digest('hex');
+  return hashRawValue(raw);
+};
+
+const buildIpHash = (ipAddress) => hashRawValue(`ip:${ipAddress || 'unknown'}`);
+
+const clampWeight = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(VOTE_MIN_WEIGHT, Math.min(1, numeric));
+};
+
+const getAccountAgeDays = (user) => {
+  if (!user?.createdAt) return 0;
+  const createdAt = new Date(user.createdAt).getTime();
+  if (!Number.isFinite(createdAt)) return 0;
+  return Math.max(0, Math.floor((Date.now() - createdAt) / (24 * 60 * 60 * 1000)));
+};
+
+const resolveUser = async (userId) => {
+  if (!userId) return null;
+  try {
+    return await User.findById(userId).select('_id createdAt role').lean();
+  } catch {
+    return null;
+  }
+};
+
+const buildCrowdSummary = ({ totalLikes = 0, totalDislikes = 0, weightedLikes = 0, weightedDislikes = 0 }) => {
+  // Use weighted totals if available, otherwise fall back to unweighted
+  const likes = weightedLikes > 0 ? weightedLikes : totalLikes;
+  const dislikes = weightedDislikes > 0 ? weightedDislikes : totalDislikes;
+  
+  const sampleSize = totalLikes + totalDislikes;
+  const weightedSampleSize = likes + dislikes;
+  const leadingOption = likes >= dislikes ? 'like' : 'dislike';
+  const leadingCount = leadingOption === 'like' ? likes : dislikes;
+  const isSampleReliable = sampleSize >= VOTE_RELIABLE_SAMPLE_SIZE;
+  const leadingPercent = weightedSampleSize > 0 && isSampleReliable
+    ? Math.round((leadingCount / weightedSampleSize) * 100)
+    : null;
+
+  return {
+    leadingOption,
+    leadingPercent,
+    sampleSize,
+    weightedSampleSize: Math.round(weightedSampleSize * 10) / 10,
+    isSampleReliable
+  };
+};
+
+const detectVoteManipulation = async (predictionId) => {
+  const since = new Date(Date.now() - VOTE_BURST_WINDOW_MS);
+
+  const [recentVoteCount, topIpBucket] = await Promise.all([
+    PredictionVote.countDocuments({ predictionId, createdAt: { $gte: since } }),
+    PredictionVote.aggregate([
+      { $match: { predictionId, createdAt: { $gte: since } } },
+      { $group: { _id: '$ipHash', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 1 }
+    ])
+  ]);
+
+  const topIpCount = topIpBucket?.[0]?.count || 0;
+  const topIpShare = recentVoteCount > 0 ? topIpCount / recentVoteCount : 0;
+  const isVelocitySpike = recentVoteCount >= VOTE_BURST_THRESHOLD;
+  const isIpConcentrated = recentVoteCount >= 10 && topIpShare >= VOTE_BURST_MAX_SINGLE_IP_SHARE;
+
+  const flags = [];
+  if (isVelocitySpike) flags.push('velocity_spike');
+  if (isIpConcentrated) flags.push('ip_concentration');
+
+  return {
+    suspicious: flags.length > 0,
+    flags,
+    recentVoteCount,
+    topIpShare: Number(topIpShare.toFixed(2))
+  };
+};
+
+const calculateVoteWeight = async ({ predictionId, ipHash, user }) => {
+  let weight = 1;
+  const suspicionFlags = [];
+
+  const accountAgeDays = getAccountAgeDays(user);
+
+  if (user && user.role !== 'admin') {
+    if (accountAgeDays < VOTE_NEW_ACCOUNT_DAYS) {
+      weight = Math.min(weight, VOTE_NEW_ACCOUNT_WEIGHT);
+      suspicionFlags.push('new_account', 'account_age');
+    } else if (accountAgeDays < VOTE_RECENT_ACCOUNT_DAYS) {
+      weight = Math.min(weight, VOTE_RECENT_ACCOUNT_WEIGHT);
+      suspicionFlags.push('account_age');
+    }
+  }
+
+  const since = new Date(Date.now() - VOTE_BURST_WINDOW_MS);
+  const [recentVoteCount, sameIpCount] = await Promise.all([
+    PredictionVote.countDocuments({ predictionId, createdAt: { $gte: since } }),
+    PredictionVote.countDocuments({ predictionId, ipHash, createdAt: { $gte: since } })
+  ]);
+
+  const topIpShare = recentVoteCount > 0 ? sameIpCount / recentVoteCount : 0;
+
+  if (recentVoteCount >= VOTE_BURST_THRESHOLD) {
+    weight = Math.min(weight, VOTE_VELOCITY_SPIKE_WEIGHT);
+    suspicionFlags.push('velocity_spike');
+  }
+
+  if (recentVoteCount >= 10 && topIpShare >= VOTE_BURST_MAX_SINGLE_IP_SHARE) {
+    weight = Math.min(weight, VOTE_IP_CONCENTRATION_WEIGHT);
+    suspicionFlags.push('ip_concentration');
+  }
+
+  return {
+    weight: clampWeight(weight),
+    suspicionFlags: [...new Set(suspicionFlags)],
+    accountAgeDays
+  };
 };
 
 const getVoteStats = async (predictionId) => {
+  // Get unweighted vote stats
   const grouped = await PredictionVote.aggregate([
     { $match: { predictionId } },
     { $group: { _id: '$voteType', count: { $sum: 1 } } }
@@ -151,38 +306,93 @@ const getVoteStats = async (predictionId) => {
     return acc;
   }, { totalLikes: 0, totalDislikes: 0 });
 
+  // Get weighted vote stats
+  const weightedGrouped = await PredictionVote.aggregate([
+    { $match: { predictionId } },
+    { 
+      $group: { 
+        _id: '$voteType', 
+        weightedCount: { $sum: '$weight' } 
+      } 
+    }
+  ]);
+
+  const weighted = weightedGrouped.reduce((acc, item) => {
+    if (item._id === 'like') acc.weightedLikes = item.weightedCount;
+    if (item._id === 'dislike') acc.weightedDislikes = item.weightedCount;
+    return acc;
+  }, { weightedLikes: 0, weightedDislikes: 0 });
+
   await PredictionRecord.findByIdAndUpdate(predictionId, {
     $set: {
       'votes.totalLikes': totals.totalLikes,
-      'votes.totalDislikes': totals.totalDislikes
+      'votes.totalDislikes': totals.totalDislikes,
+      'votes.weightedLikes': Number((weighted.weightedLikes || 0).toFixed(3)),
+      'votes.weightedDislikes': Number((weighted.weightedDislikes || 0).toFixed(3))
     }
   });
 
-  return totals;
+  return { ...totals, ...weighted };
 };
 
-const castVote = async ({ predictionId, voteType, deviceId, ipAddress, userAgent }) => {
+const castVote = async ({ predictionId, voteType, deviceId, ipAddress, userAgent, userId = null }) => {
   const record = await PredictionRecord.findById(predictionId);
   if (!record) return null;
 
   const deviceHash = buildDeviceHash({ deviceId, ipAddress, userAgent });
+  const ipHash = buildIpHash(ipAddress);
+  const user = await resolveUser(userId);
 
-  const existingVote = await PredictionVote.findOne({ predictionId, deviceHash });
+  const selector = user?._id
+    ? { predictionId, userId: user._id }
+    : { predictionId, deviceHash };
+
+  const existingVote = await PredictionVote.findOne(selector);
+  const voteWeight = await calculateVoteWeight({ predictionId: record._id, ipHash, user });
 
   if (existingVote) {
-    if (existingVote.voteType !== voteType) {
+    const lastUpdatedAt = existingVote.updatedAt ? new Date(existingVote.updatedAt).getTime() : 0;
+    const canChangeVoteAt = lastUpdatedAt + VOTE_COOLDOWN_MS;
+
+    if (existingVote.voteType !== voteType && Date.now() < canChangeVoteAt) {
+      throw new CustomError('Please wait before changing your vote', 429, 'VOTE_COOLDOWN_ACTIVE');
+    }
+
+    if (existingVote.voteType !== voteType || existingVote.ipHash !== ipHash) {
       existingVote.voteType = voteType;
+      existingVote.ipHash = ipHash;
+      existingVote.weight = voteWeight.weight;
+      existingVote.suspicionFlags = voteWeight.suspicionFlags;
+      existingVote.accountAgeDays = voteWeight.accountAgeDays;
+      if (user?._id) {
+        existingVote.userId = user._id;
+      }
       await existingVote.save();
     }
   } else {
-    await PredictionVote.create({ predictionId, deviceHash, voteType });
+    await PredictionVote.create({
+      predictionId,
+      userId: user?._id,
+      deviceHash,
+      ipHash,
+      voteType,
+      weight: voteWeight.weight,
+      suspicionFlags: voteWeight.suspicionFlags,
+      accountAgeDays: voteWeight.accountAgeDays
+    });
   }
 
   const totals = await getVoteStats(record._id);
+  const crowd = buildCrowdSummary(totals);
+  const integrity = await detectVoteManipulation(record._id);
+
   return {
     predictionId: record._id,
     voteType,
-    ...totals
+    weightApplied: voteWeight.weight,
+    ...totals,
+    crowd,
+    integrity
   };
 };
 
@@ -261,6 +471,23 @@ const markExpiredPredictions = async ({ limit = 500 } = {}) => {
     }
 
     await record.save();
+
+    if (record.actualAnswer && typeof record.aiProbability === 'number') {
+      try {
+        await mlTrainingDataService.storeTrainingEntry(record, 'expiry_cleanup');
+      } catch (error) {
+        logger.warn(`ML training data storage skipped for ${record._id}: ${error.message}`);
+      }
+
+      setImmediate(() => {
+        try {
+          mlCorrectionService.trainFromResolvedPrediction(record);
+        } catch (error) {
+          logger.warn(`ML correction training skipped for ${record._id}: ${error.message}`);
+        }
+      });
+    }
+
     expiredCount++;
   }
 
@@ -279,6 +506,7 @@ module.exports = {
   editAiProbability,
   castVote,
   getVoteStats,
+  buildCrowdSummary,
   formatProbabilityStatement,
   resolveDisplayReason,
   markExpiredPredictions

@@ -68,7 +68,7 @@ describe('API Integration Tests', () => {
       const response = await request(app)
         .post('/api/predictions')
         .send({})
-        .expect(400);
+        .expect(403);
       
       expect(response.body).toHaveProperty('error');
     });
@@ -136,7 +136,7 @@ describe('API Integration Tests', () => {
       const response = await request(app)
         .post('/api/predictions')
         .send({ marketId: null })
-        .expect(400);
+        .expect(403);
       
       expect(response.body).toHaveProperty('error');
     });

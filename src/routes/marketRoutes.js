@@ -9,6 +9,7 @@ const router = express.Router();
 const { body, query, param } = require('express-validator');
 const marketController = require('../controllers/marketController');
 const { generalLimiter } = require('../middlewares/rateLimit');
+const validateRequest = require('../middlewares/validateRequest');
 
 // Apply rate limiting to all routes
 router.use(generalLimiter);
@@ -25,6 +26,7 @@ router.get('/',
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt()
   ],
+  validateRequest,
   marketController.getMarkets
 );
 
@@ -37,6 +39,7 @@ router.get('/search',
     query('q').notEmpty().withMessage('Search query is required').trim(),
     query('limit').optional().isInt({ min: 1, max: 50 }).toInt()
   ],
+  validateRequest,
   marketController.searchMarkets
 );
 
@@ -48,6 +51,7 @@ router.get('/trending',
   [
     query('limit').optional().isInt({ min: 1, max: 50 }).toInt()
   ],
+  validateRequest,
   marketController.getTrendingMarkets
 );
 
@@ -60,6 +64,7 @@ router.get('/category/:category',
     param('category').notEmpty().trim(),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt()
   ],
+  validateRequest,
   marketController.getMarketsByCategory
 );
 
@@ -71,6 +76,7 @@ router.get('/:id',
   [
     param('id').notEmpty().withMessage('Market ID is required').trim()
   ],
+  validateRequest,
   marketController.getMarketById
 );
 

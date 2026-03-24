@@ -167,6 +167,16 @@ const predictionRecordSchema = new mongoose.Schema({
       type: Number,
       default: 0,
       min: 0
+    },
+    weightedLikes: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    weightedDislikes: {
+      type: Number,
+      default: 0,
+      min: 0
     }
   },
   reason: {

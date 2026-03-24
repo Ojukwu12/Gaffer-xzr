@@ -14,6 +14,46 @@ const predictionTrackingService = require('../services/predictionTrackingService
 const predictionModerationService = require('../services/predictionModerationService');
 const logger = require('../config/logger');
 
+const mapConfidenceLevel = (score = 0) => {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return 'low';
+  if (value >= 75) return 'high';
+  if (value >= 55) return 'medium';
+  return 'low';
+};
+
+const toPublicPredictionPayload = (prediction) => ({
+  id: prediction._id,
+  marketId: prediction.marketId,
+  status: prediction.status,
+  marketProbability: prediction.marketProbabilityAtTime,
+  aiProbability: prediction.aiProbability,
+  confidence: mapConfidenceLevel(prediction.confidence)
+});
+
+const toPublicDateLabel = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+const sanitizePerformanceItem = (item = {}) => ({
+  id: item.id,
+  marketId: item.marketId,
+  marketTitle: item.marketTitle,
+  option: item.option,
+  predictedAnswer: item.predictedAnswer,
+  actualAnswer: item.actualAnswer,
+  isCorrect: item.isCorrect,
+  confidence: item.confidence,
+  marketClassification: item.marketClassification || null,
+  expectedEdgeScore: item.expectedEdgeScore ?? null,
+  predictionDate: toPublicDateLabel(item.predictedAt),
+  resolvedDate: toPublicDateLabel(item.resolvedAt),
+  polymarketUrl: item.polymarketUrl
+});
+
 /**
  * Get approved unified prediction for a market (single YES/NO answer)
  * GET /api/markets/:id/predict-unified
@@ -42,25 +82,7 @@ const getUnifiedPrediction = asyncHandler(async (req, res) => {
     throw new CustomError('No approved prediction available for this market yet', 404, 'PREDICTION_PENDING_REVIEW');
   }
   
-  return success(res, {
-    id: prediction._id,
-    marketId: prediction.marketId,
-    option: prediction.option,
-    timeframe: prediction.timeframe,
-    status: prediction.status,
-    marketProbabilityAtTime: prediction.marketProbabilityAtTime,
-    aiProbability: prediction.aiProbability,
-    confidenceScore: prediction.confidence,
-    statement: predictionModerationService.formatProbabilityStatement(
-      prediction.marketProbabilityAtTime,
-      prediction.aiProbability
-    ),
-    reason: predictionModerationService.resolveDisplayReason(prediction),
-    totalLikes: prediction.votes?.totalLikes || 0,
-    totalDislikes: prediction.votes?.totalDislikes || 0,
-    approvedAt: prediction.approvedAt,
-    updatedAt: prediction.updatedAt
-  });
+  return success(res, toPublicPredictionPayload(prediction));
 });
 
 /**
@@ -96,25 +118,7 @@ const getPrediction = asyncHandler(async (req, res) => {
     throw new CustomError('No approved prediction available for this market option yet', 404, 'PREDICTION_PENDING_REVIEW');
   }
   
-  return success(res, {
-    id: prediction._id,
-    marketId: prediction.marketId,
-    option: prediction.option,
-    timeframe: prediction.timeframe,
-    status: prediction.status,
-    marketProbabilityAtTime: prediction.marketProbabilityAtTime,
-    aiProbability: prediction.aiProbability,
-    confidenceScore: prediction.confidence,
-    statement: predictionModerationService.formatProbabilityStatement(
-      prediction.marketProbabilityAtTime,
-      prediction.aiProbability
-    ),
-    reason: predictionModerationService.resolveDisplayReason(prediction),
-    totalLikes: prediction.votes?.totalLikes || 0,
-    totalDislikes: prediction.votes?.totalDislikes || 0,
-    approvedAt: prediction.approvedAt,
-    updatedAt: prediction.updatedAt
-  });
+  return success(res, toPublicPredictionPayload(prediction));
 });
 
 /**
@@ -143,23 +147,7 @@ const getAllPredictions = asyncHandler(async (req, res) => {
   return success(res, {
     marketId: id,
     timeframe,
-    predictions: predictions.map((prediction) => ({
-      id: prediction._id,
-      option: prediction.option,
-      status: prediction.status,
-      marketProbabilityAtTime: prediction.marketProbabilityAtTime,
-      aiProbability: prediction.aiProbability,
-      confidenceScore: prediction.confidence,
-      statement: predictionModerationService.formatProbabilityStatement(
-        prediction.marketProbabilityAtTime,
-        prediction.aiProbability
-      ),
-      reason: predictionModerationService.resolveDisplayReason(prediction),
-      totalLikes: prediction.votes?.totalLikes || 0,
-      totalDislikes: prediction.votes?.totalDislikes || 0,
-      approvedAt: prediction.approvedAt,
-      updatedAt: prediction.updatedAt
-    }))
+    predictions: predictions.map((prediction) => toPublicPredictionPayload(prediction))
   });
 });
 
@@ -211,8 +199,28 @@ const getCachedPredictions = asyncHandler(async (req, res) => {
   return success(res, {
     marketId: id,
     count: approvedPredictions.length,
-    predictions: approvedPredictions
+    predictions: approvedPredictions.map((prediction) => toPublicPredictionPayload(prediction))
   });
+});
+
+/**
+ * Get approved prediction by prediction ID
+ * GET /api/predictions/:predictionId
+ */
+const getApprovedPredictionById = asyncHandler(async (req, res) => {
+  const { predictionId } = req.params;
+  const PredictionRecord = require('../models/PredictionRecord');
+
+  const prediction = await PredictionRecord.findOne({
+    _id: predictionId,
+    status: 'approved'
+  }).select('marketId status marketProbabilityAtTime aiProbability confidence');
+
+  if (!prediction) {
+    throw new CustomError('Approved prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, toPublicPredictionPayload(prediction));
 });
 
 /**
@@ -270,27 +278,19 @@ const getApprovedPredictions = asyncHandler(async (req, res) => {
   return success(res, {
     total: result.total,
     count: result.items.length,
-    predictions: result.items.map((prediction) => ({
-      id: prediction._id,
-      marketId: prediction.marketId,
-      marketTitle: prediction.marketTitle,
-      option: prediction.option,
-      timeframe: prediction.timeframe,
-      status: prediction.status,
-      marketProbabilityAtTime: prediction.marketProbabilityAtTime,
-      aiProbability: prediction.aiProbability,
-      confidenceScore: prediction.confidence,
-      statement: predictionModerationService.formatProbabilityStatement(
-        prediction.marketProbabilityAtTime,
-        prediction.aiProbability
-      ),
-      reason: predictionModerationService.resolveDisplayReason(prediction),
-      totalLikes: prediction.votes?.totalLikes || 0,
-      totalDislikes: prediction.votes?.totalDislikes || 0,
-      approvedAt: prediction.approvedAt,
-      updatedAt: prediction.updatedAt
-    }))
+    predictions: result.items.map((prediction) => toPublicPredictionPayload(prediction))
   });
+});
+
+/**
+ * Reject direct public prediction generation calls
+ */
+const rejectPublicPredictionGeneration = asyncHandler(async (_req, _res) => {
+  throw new CustomError(
+    'Prediction generation is private and only runs in backend scheduled jobs',
+    403,
+    'PREDICTION_ENGINE_PRIVATE'
+  );
 });
 
 /**
@@ -310,18 +310,26 @@ const votePrediction = asyncHandler(async (req, res) => {
     voteType,
     deviceId,
     ipAddress: req.ip,
-    userAgent: req.get('user-agent')
+    userAgent: req.get('user-agent'),
+    userId: req.user?._id || null
   });
 
   if (!vote) {
     throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
   }
 
+  const crowdMessage = vote.crowd?.isSampleReliable
+    ? `You and ${vote.crowd.leadingPercent}% of others voted this option.`
+    : 'Vote recorded. Community trend is still forming.';
+
   return success(res, {
     predictionId: vote.predictionId,
     voteType: vote.voteType,
     totalLikes: vote.totalLikes,
-    totalDislikes: vote.totalDislikes
+    totalDislikes: vote.totalDislikes,
+    crowd: vote.crowd,
+    integrity: vote.integrity,
+    message: crowdMessage
   });
 });
 
@@ -338,10 +346,14 @@ const getPredictionVotes = asyncHandler(async (req, res) => {
     throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
   }
 
+  const totalLikes = prediction.votes?.totalLikes || 0;
+  const totalDislikes = prediction.votes?.totalDislikes || 0;
+
   return success(res, {
     predictionId,
-    totalLikes: prediction.votes?.totalLikes || 0,
-    totalDislikes: prediction.votes?.totalDislikes || 0
+    totalLikes,
+    totalDislikes,
+    crowd: predictionModerationService.buildCrowdSummary({ totalLikes, totalDislikes })
   });
 });
 
@@ -368,8 +380,26 @@ const getPredictionPerformance = asyncHandler(async (req, res) => {
   });
 
   return success(res, {
-    performance,
-    readiness
+    performance: {
+      ...performance,
+      correctPredictions: (performance.correctPredictions || []).map(sanitizePerformanceItem),
+      incorrectPredictions: (performance.incorrectPredictions || []).map(sanitizePerformanceItem),
+      pendingPredictions: (performance.pendingPredictions || []).map((item) => ({
+        id: item.id,
+        marketId: item.marketId,
+        marketTitle: item.marketTitle,
+        option: item.option,
+        predictedAnswer: item.predictedAnswer,
+        confidence: item.confidence,
+        predictionDate: toPublicDateLabel(item.predictedAt),
+        polymarketUrl: item.polymarketUrl
+      }))
+    },
+    readiness: {
+      ready: readiness.ready,
+      checks: readiness.checks,
+      reasons: readiness.reasons
+    }
   });
 });
 
@@ -382,6 +412,8 @@ module.exports = {
   batchPredict,
   getPredictionPerformance,
   getApprovedPredictions,
+  getApprovedPredictionById,
+  rejectPublicPredictionGeneration,
   votePrediction,
   getPredictionVotes
 };

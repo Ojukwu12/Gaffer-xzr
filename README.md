@@ -163,11 +163,9 @@ docs/API_DOCUMENTATION.md  # API reference
 - `GET /api/markets/trending` - Trending markets
 
 ### Predictions
-- `GET /api/markets/:id/predict` - Generate prediction
-- `GET /api/markets/:id/predict-unified` - Generate single YES/NO prediction
-- `GET /api/markets/:id/predict-all` - Predict all options
-- `GET /api/markets/:id/features` - Get features only
-- `POST /api/predictions/batch` - Batch predictions
+- `GET /api/predictions` - List approved predictions (read-only)
+- `GET /api/predictions/:predictionId` - Get approved prediction by ID
+- `POST /api/predictions/:predictionId/vote` - Submit UI feedback vote
 - `GET /api/predictions/performance` - Win-rate + correct/incorrect predictions (max 30 days)
 
 ### Notifications

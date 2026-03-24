@@ -20,6 +20,31 @@ const logger = require('../config/logger');
 const mongoose = require('mongoose');
 const Webhook = require('../models/Webhook');
 
+const scheduleApprovedPredictionNotification = (prediction) => {
+  const publishAt = prediction?.approvedAt ? new Date(prediction.approvedAt).getTime() : Date.now();
+  const delayMs = Math.max(0, publishAt - Date.now());
+
+  setTimeout(async () => {
+    try {
+      const rawMarket = await polymarketService.fetchMarketById(prediction.marketId);
+      const marketData = polymarketService.parseMarket(rawMarket);
+
+      await notificationService.sendPredictionNotification(
+        prediction.marketId,
+        {
+          option: prediction.option,
+          confidence: prediction.confidence,
+          reason: predictionModerationService.resolveDisplayReason(prediction),
+          timeframe: prediction.timeframe
+        },
+        marketData
+      );
+    } catch (error) {
+      logger.warn(`Delayed approved prediction notification failed for ${prediction.marketId}: ${error.message}`);
+    }
+  }, delayMs);
+};
+
 /**
  * Clear cache
  * POST /api/admin/cache/clear
@@ -602,37 +627,27 @@ const approvePrediction = asyncHandler(async (req, res) => {
   const { reviewNotes = '' } = req.body;
   const reviewedBy = req.user?.email || req.user?.id || 'admin';
 
-  const prediction = await predictionModerationService.approvePrediction({
+  const approvalResult = await predictionModerationService.approvePrediction({
     predictionId: id,
     reviewedBy,
     reviewNotes
   });
 
+  const prediction = approvalResult?.record || null;
+
   if (!prediction) {
     throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
   }
 
-  try {
-    const rawMarket = await polymarketService.fetchMarketById(prediction.marketId);
-    const marketData = polymarketService.parseMarket(rawMarket);
-
-    await notificationService.sendPredictionNotification(
-      prediction.marketId,
-      {
-        option: prediction.option,
-        confidence: prediction.confidence,
-        reason: predictionModerationService.resolveDisplayReason(prediction),
-        timeframe: prediction.timeframe
-      },
-      marketData
-    );
-  } catch (error) {
-    logger.warn(`Approved prediction notification failed for ${prediction.marketId}: ${error.message}`);
-  }
+  scheduleApprovedPredictionNotification(prediction);
 
   return success(res, {
     approved: true,
-    prediction
+    prediction,
+    publication: {
+      scheduled: true,
+      delayMs: approvalResult?.publicationDelayMs || 0
+    }
   });
 });
 
