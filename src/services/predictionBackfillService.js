@@ -8,7 +8,7 @@ const PredictionRecord = require('../models/PredictionRecord');
 const MigrationState = require('../models/MigrationState');
 const logger = require('../config/logger');
 
-const BACKFILL_KEY = '2026-03-27-approved-reason-backfill-v1';
+const BACKFILL_KEY = '2026-03-29-approved-pending-reason-backfill-v2';
 
 const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -41,18 +41,15 @@ const buildReason = (record) => {
   const title = normalizeText(record.marketTitle || record.marketId || 'this market');
   const yesProbability = toPercent(record.aiProbability, record.predictedAnswer === 'YES' ? 60 : 40);
   const noProbability = toPercent(100 - yesProbability);
-  const marketProbability = toPercent(record.marketProbabilityAtTime, 50);
   const side = (record.predictedAnswer === 'YES' || record.predictedAnswer === 'NO')
     ? record.predictedAnswer
     : (yesProbability >= 50 ? 'YES' : 'NO');
+  const sideProbability = side === 'YES' ? yesProbability : noProbability;
   const confidence = Number.isFinite(Number(record.confidence)) ? Number(record.confidence) : null;
-  const classification = record.marketClassification ? ` in ${record.marketClassification}` : '';
-  const edge = Number.isFinite(Number(record.expectedEdgeScore))
-    ? ` Expected edge score is ${toPercent(record.expectedEdgeScore)}%.`
-    : '';
+  const classification = record.marketClassification ? ` (${record.marketClassification})` : '';
   const confidenceText = confidence !== null ? ` Confidence is ${toPercent(confidence)}%.` : '';
 
-  return `${title}${classification}: choose ${side} because the model estimates YES at ${yesProbability}% and NO at ${noProbability}% while market-implied probability is ${marketProbability}%.${confidenceText}${edge}`;
+  return `${title}${classification}: model estimates ${side} has ${sideProbability}% probability.${confidenceText}`;
 };
 
 const runApprovedReasonBackfillOnce = async () => {
@@ -63,7 +60,7 @@ const runApprovedReasonBackfillOnce = async () => {
         key: BACKFILL_KEY,
         state: 'running',
         startedAt: new Date(),
-        notes: 'Backfill approved prediction reasons with market-specific summaries.'
+        notes: 'Backfill approved and pending prediction reasons with market-specific format (focus on higher probability outcome).'
       }
     },
     { upsert: true }
@@ -71,7 +68,7 @@ const runApprovedReasonBackfillOnce = async () => {
 
   if (!lockResult.upsertedCount) {
     const existing = await MigrationState.findOne({ key: BACKFILL_KEY }).lean();
-    logger.info('Approved-reason backfill already recorded; skipping.', {
+    logger.info('Approved-pending reason backfill already recorded; skipping.', {
       key: BACKFILL_KEY,
       state: existing?.state || 'unknown',
       completedAt: existing?.completedAt || null
@@ -89,7 +86,7 @@ const runApprovedReasonBackfillOnce = async () => {
   let skipped = 0;
 
   try {
-    const records = await PredictionRecord.find({ status: 'approved' })
+    const records = await PredictionRecord.find({ status: { $in: ['approved', 'pending'] } })
       .select('reason marketTitle marketId predictedAnswer aiProbability marketProbabilityAtTime confidence marketClassification expectedEdgeScore')
       .lean();
 
@@ -127,7 +124,7 @@ const runApprovedReasonBackfillOnce = async () => {
       }
     );
 
-    logger.info('Approved prediction reason backfill completed', {
+    logger.info('Approved-pending prediction reason backfill completed', {
       key: BACKFILL_KEY,
       scanned,
       updated,
