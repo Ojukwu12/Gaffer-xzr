@@ -45,11 +45,22 @@ const buildReason = (record) => {
     ? record.predictedAnswer
     : (yesProbability >= 50 ? 'YES' : 'NO');
   const sideProbability = side === 'YES' ? yesProbability : noProbability;
+  const otherSideProbability = side === 'YES' ? noProbability : yesProbability;
   const confidence = Number.isFinite(Number(record.confidence)) ? Number(record.confidence) : null;
   const classification = record.marketClassification ? ` (${record.marketClassification})` : '';
-  const confidenceText = confidence !== null ? ` Confidence is ${toPercent(confidence)}%.` : '';
+  
+  const confidenceLevel = confidence !== null 
+    ? (confidence >= 80 ? 'high' : confidence >= 50 ? 'medium' : 'low')
+    : 'moderate';
+  
+  const advantage = sideProbability - otherSideProbability;
+  const reasonText = advantage > 30 
+    ? `${side} is significantly more likely with a ${advantage.toFixed(1)} percentage point advantage.`
+    : advantage > 15
+      ? `${side} has a meaningful probability advantage at ${advantage.toFixed(1)} percentage points.`
+      : `${side} edges out the alternative with ${advantage.toFixed(1)} percentage points higher probability.`;
 
-  return `${title}${classification}: model estimates ${side} has ${sideProbability}% probability.${confidenceText}`;
+  return `${title}${classification}: choose ${side} because the model estimates ${side} at ${sideProbability}% probability versus ${otherSideProbability}%. ${reasonText} This prediction has ${confidenceLevel} confidence.`;
 };
 
 const runApprovedReasonBackfillOnce = async () => {

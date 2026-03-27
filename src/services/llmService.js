@@ -78,9 +78,10 @@ const reasonLooksGeneric = (reason = '', anchors = { tokens: [], entities: [] })
 const buildMarketSpecificReason = ({ prediction = {}, marketData = {}, option = '', features = {} }) => {
   const title = normalizeText(marketData.title || marketData.question || 'this market');
   const selected = String(prediction.prediction || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO';
-  const selectedProbability = selected === 'YES' 
-    ? toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50))
-    : toPercent(prediction.no_probability, toPercent(100 - toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50)), 50));
+  const yesProbability = toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50));
+  const noProbability = toPercent(prediction.no_probability, toPercent(100 - yesProbability, 50));
+  const selectedProbability = selected === 'YES' ? yesProbability : noProbability;
+  const altProbability = selected === 'YES' ? noProbability : yesProbability;
 
   const signalParts = [];
 
@@ -106,11 +107,18 @@ const buildMarketSpecificReason = ({ prediction = {}, marketData = {}, option = 
     signalParts.push(`external score is ${toPercent(features.externalDataCompositeScore)}%`);
   }
 
+  const advantage = selectedProbability - altProbability;
+  const reasonText = advantage > 30 
+    ? `${selected} is significantly more likely with a ${advantage.toFixed(1)} point advantage.`
+    : advantage > 15
+      ? `${selected} has a meaningful advantage at ${advantage.toFixed(1)} points over the alternative.`
+      : `${selected} edges out the alternative with ${advantage.toFixed(1)} point higher probability.`;
+
   const topSignals = signalParts.slice(0, 3).join(', ');
   const classification = features.marketClassification ? ` (${features.marketClassification})` : '';
   const optionLabel = normalizeText(option) || 'selected option';
 
-  return `${title}${classification}: model estimates ${selected} has ${selectedProbability}% probability for ${optionLabel}. This prediction is supported by ${topSignals || 'the strongest available market and model signals for this specific market'}.`;
+  return `${title}${classification}: choose ${selected} for ${optionLabel} because the model estimates ${selected} at ${selectedProbability}%. ${reasonText} This call is supported by ${topSignals || 'the strongest available market and model signals for this specific market'}.`;
 };
 
 const ensureMarketSpecificReason = ({ reason, prediction, marketData, option, features }) => {
