@@ -78,8 +78,9 @@ const reasonLooksGeneric = (reason = '', anchors = { tokens: [], entities: [] })
 const buildMarketSpecificReason = ({ prediction = {}, marketData = {}, option = '', features = {} }) => {
   const title = normalizeText(marketData.title || marketData.question || 'this market');
   const selected = String(prediction.prediction || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO';
-  const yesProbability = toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50));
-  const noProbability = toPercent(prediction.no_probability, toPercent(100 - yesProbability, 50));
+  const selectedProbability = selected === 'YES' 
+    ? toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50))
+    : toPercent(prediction.no_probability, toPercent(100 - toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50)), 50));
 
   const signalParts = [];
 
@@ -109,7 +110,7 @@ const buildMarketSpecificReason = ({ prediction = {}, marketData = {}, option = 
   const classification = features.marketClassification ? ` (${features.marketClassification})` : '';
   const optionLabel = normalizeText(option) || 'selected option';
 
-  return `${title}${classification}: choose ${selected} for ${optionLabel} with YES at ${yesProbability}% and NO at ${noProbability}%. This call is supported by ${topSignals || 'the strongest available market and model signals for this specific market'}.`;
+  return `${title}${classification}: model estimates ${selected} has ${selectedProbability}% probability for ${optionLabel}. This prediction is supported by ${topSignals || 'the strongest available market and model signals for this specific market'}.`;
 };
 
 const ensureMarketSpecificReason = ({ reason, prediction, marketData, option, features }) => {

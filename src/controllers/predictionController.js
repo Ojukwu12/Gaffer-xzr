@@ -40,9 +40,10 @@ const resolveRecommendedSide = (prediction) => {
 
 const buildRecommendationSummary = ({ marketTitle, recommendedBet, yesProbability, noProbability, reason }) => {
   const side = recommendedBet || 'N/A';
+  const sideProb = side === 'YES' ? yesProbability : noProbability;
   const why = reason || 'No additional reason is available for this prediction yet.';
   const marketLabel = marketTitle || 'this market';
-  return `Choose ${side} for ${marketLabel} because the model estimates YES at ${yesProbability}% and NO at ${noProbability}%. ${why}`;
+  return `Choose ${side} for ${marketLabel} because our model estimates ${side} at ${sideProb}%. ${why}`;
 };
 
 const toPublicPredictionPayload = (prediction) => {
