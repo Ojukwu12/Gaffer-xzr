@@ -57,18 +57,19 @@ const clearCache = asyncHandler(async (req, res) => {
   let result;
   
   switch (type) {
-    case 'all':
-      result = await cacheService.clearAll();
-      break;
-    case 'expired':
-      result = await cacheService.clearExpired();
-      break;
-    case 'predictions':
-      const PredictionCache = require('../models/PredictionCache');
-      result = await PredictionCache.deleteMany({});
-      break;
-    default:
-      throw new CustomError('Invalid cache type', 400, 'INVALID_TYPE');
+  case 'all':
+    result = await cacheService.clearAll();
+    break;
+  case 'expired':
+    result = await cacheService.clearExpired();
+    break;
+  case 'predictions': {
+    const PredictionCache = require('../models/PredictionCache');
+    result = await PredictionCache.deleteMany({});
+    break;
+  }
+  default:
+    throw new CustomError('Invalid cache type', 400, 'INVALID_TYPE');
   }
   
   return success(res, {
@@ -619,6 +620,37 @@ const listPredictions = asyncHandler(async (req, res) => {
 });
 
 /**
+ * List predictions by moderation status
+ * GET /api/admin/predictions/status/:status
+ */
+const listPredictionsByStatus = asyncHandler(async (req, res) => {
+  const { status } = req.params;
+  const {
+    marketId,
+    timeframe,
+    mode,
+    limit = 50,
+    offset = 0
+  } = req.query;
+
+  const result = await predictionModerationService.listPredictionsByStatus({
+    status,
+    marketId,
+    timeframe,
+    evaluationMode: mode,
+    limit: Number(limit),
+    offset: Number(offset)
+  });
+
+  return success(res, {
+    status,
+    total: result.total,
+    count: result.items.length,
+    predictions: result.items
+  });
+});
+
+/**
  * Approve pending/rejected prediction
  * POST /api/admin/predictions/:id/approve
  */
@@ -705,6 +737,79 @@ const editPredictionProbability = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Edit AI probability for approved predictions only
+ * PATCH /api/admin/predictions/:id/approved/probability
+ */
+const editApprovedPredictionProbability = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { aiProbability } = req.body;
+  const editedBy = req.user?.email || req.user?.id || 'admin';
+
+  if (!Number.isFinite(Number(aiProbability))) {
+    throw new CustomError('aiProbability must be a number from 0 to 100', 400, 'INVALID_AI_PROBABILITY');
+  }
+
+  const prediction = await predictionModerationService.editApprovedAiProbability({
+    predictionId: id,
+    aiProbability: Number(aiProbability),
+    editedBy
+  });
+
+  if (!prediction) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, {
+    updated: true,
+    prediction
+  });
+});
+
+/**
+ * Delete a pending prediction
+ * DELETE /api/admin/predictions/:id/pending
+ */
+const deletePendingPrediction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const deleted = await predictionModerationService.deletePredictionByStatus({
+    predictionId: id,
+    status: 'pending'
+  });
+
+  if (!deleted) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, {
+    deleted: true,
+    prediction: deleted
+  });
+});
+
+/**
+ * Delete an approved prediction
+ * DELETE /api/admin/predictions/:id/approved
+ */
+const deleteApprovedPrediction = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const deleted = await predictionModerationService.deletePredictionByStatus({
+    predictionId: id,
+    status: 'approved'
+  });
+
+  if (!deleted) {
+    throw new CustomError('Prediction not found', 404, 'PREDICTION_NOT_FOUND');
+  }
+
+  return success(res, {
+    deleted: true,
+    prediction: deleted
+  });
+});
+
 module.exports = {
   clearCache,
   runCron,
@@ -726,7 +831,11 @@ module.exports = {
   deleteWebhook,
   testWebhook,
   listPredictions,
+  listPredictionsByStatus,
   approvePrediction,
   rejectPrediction,
-  editPredictionProbability
+  editPredictionProbability,
+  editApprovedPredictionProbability,
+  deletePendingPrediction,
+  deleteApprovedPrediction
 };

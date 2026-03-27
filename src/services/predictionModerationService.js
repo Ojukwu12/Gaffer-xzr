@@ -106,6 +106,21 @@ const listPredictions = async ({ status, limit = 50, offset = 0, marketId, evalu
   return { items, total };
 };
 
+const listPredictionsByStatus = async ({ status, limit = 50, offset = 0, marketId, evaluationMode, timeframe }) => {
+  if (!['pending', 'approved'].includes(status)) {
+    throw new CustomError('Status must be pending or approved', 400, 'INVALID_PREDICTION_STATUS');
+  }
+
+  return listPredictions({
+    status,
+    limit,
+    offset,
+    marketId,
+    evaluationMode,
+    timeframe
+  });
+};
+
 const approvePrediction = async ({ predictionId, reviewedBy, reviewNotes = '' }) => {
   const record = await PredictionRecord.findById(predictionId);
   if (!record) return null;
@@ -163,6 +178,43 @@ const editAiProbability = async ({ predictionId, aiProbability, editedBy }) => {
 
   await record.save();
   return record;
+};
+
+const editApprovedAiProbability = async ({ predictionId, aiProbability, editedBy }) => {
+  const record = await PredictionRecord.findById(predictionId);
+  if (!record) return null;
+
+  if (record.status !== 'approved') {
+    throw new CustomError('Only approved predictions can be edited with this endpoint', 400, 'PREDICTION_NOT_APPROVED');
+  }
+
+  return editAiProbability({ predictionId, aiProbability, editedBy });
+};
+
+const deletePredictionByStatus = async ({ predictionId, status }) => {
+  if (!['pending', 'approved'].includes(status)) {
+    throw new CustomError('Status must be pending or approved', 400, 'INVALID_PREDICTION_STATUS');
+  }
+
+  const record = await PredictionRecord.findById(predictionId);
+  if (!record) return null;
+
+  if (record.status !== status) {
+    throw new CustomError(
+      `Prediction status mismatch. Expected ${status}, found ${record.status}.`,
+      400,
+      'PREDICTION_STATUS_MISMATCH'
+    );
+  }
+
+  await PredictionVote.deleteMany({ predictionId: record._id });
+  await PredictionRecord.deleteOne({ _id: record._id });
+
+  return {
+    id: record._id,
+    marketId: record.marketId,
+    status: record.status
+  };
 };
 
 const hashRawValue = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
@@ -501,9 +553,12 @@ module.exports = {
   findLatestApprovedPrediction,
   findApprovedPredictionsForMarket,
   listPredictions,
+  listPredictionsByStatus,
   approvePrediction,
   rejectPrediction,
   editAiProbability,
+  editApprovedAiProbability,
+  deletePredictionByStatus,
   castVote,
   getVoteStats,
   buildCrowdSummary,

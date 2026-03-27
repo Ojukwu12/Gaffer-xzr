@@ -6,7 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { body, param } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const adminController = require('../controllers/adminController');
 const { strictLimiter } = require('../middlewares/rateLimit');
 const { requireApiKey, requireAdmin, requireAdminSecretKey } = require('../middlewares/auth');
@@ -233,6 +233,28 @@ router.get('/predictions',
 );
 
 /**
+ * GET /api/admin/predictions/status/:status
+ * List predictions by moderation status (pending or approved)
+ */
+router.get('/predictions/status/:status',
+  [
+    param('status')
+      .isIn(['pending', 'approved'])
+      .withMessage('Status must be pending or approved'),
+    query('limit')
+      .optional()
+      .isInt({ min: 1, max: 200 })
+      .toInt(),
+    query('offset')
+      .optional()
+      .isInt({ min: 0 })
+      .toInt()
+  ],
+  validateRequest,
+  adminController.listPredictionsByStatus
+);
+
+/**
  * POST /api/admin/predictions/:id/approve
  * Approve a prediction
  */
@@ -287,35 +309,82 @@ router.patch('/predictions/:id/probability',
   adminController.editPredictionProbability
 );
 
-  /**
+/**
+ * PATCH /api/admin/predictions/:id/approved/probability
+ * Edit AI probability only when prediction is approved
+ */
+router.patch('/predictions/:id/approved/probability',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID'),
+    body('aiProbability')
+      .notEmpty()
+      .withMessage('aiProbability is required')
+      .isFloat({ min: 0, max: 100 })
+      .withMessage('aiProbability must be between 0 and 100')
+  ],
+  validateRequest,
+  adminController.editApprovedPredictionProbability
+);
+
+/**
+ * DELETE /api/admin/predictions/:id/pending
+ * Delete a pending prediction
+ */
+router.delete('/predictions/:id/pending',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID')
+  ],
+  validateRequest,
+  adminController.deletePendingPrediction
+);
+
+/**
+ * DELETE /api/admin/predictions/:id/approved
+ * Delete an approved prediction
+ */
+router.delete('/predictions/:id/approved',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid prediction ID')
+  ],
+  validateRequest,
+  adminController.deleteApprovedPrediction
+);
+
+/**
    * GET /api/admin/external-data/:marketId
    * Get external data diagnostics for a specific market
    */
-  router.get('/external-data/:marketId',
-    [
-      param('marketId')
-        .notEmpty()
-        .withMessage('Market ID is required')
-    ],
-    validateRequest,
-    adminController.getExternalDataDiagnostics
-  );
+router.get('/external-data/:marketId',
+  [
+    param('marketId')
+      .notEmpty()
+      .withMessage('Market ID is required')
+  ],
+  validateRequest,
+  adminController.getExternalDataDiagnostics
+);
 
-  /**
+/**
    * GET /api/admin/health/external-sources
    * Check health status of external data providers
    */
-  router.get('/health/external-sources',
-    adminController.checkExternalSourcesHealth
-  );
+router.get('/health/external-sources',
+  adminController.checkExternalSourcesHealth
+);
 
-  /**
+/**
    * GET /api/admin/metrics/external-data
    * Get external data performance metrics and statistics
    */
-  router.get('/metrics/external-data',
-    adminController.getExternalDataMetrics
-  );
+router.get('/metrics/external-data',
+  adminController.getExternalDataMetrics
+);
 
 module.exports = router;
 

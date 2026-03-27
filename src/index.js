@@ -245,6 +245,14 @@ const startServer = async () => {
       logger.warn(`Could not load admin users during startup: ${adminLookupError.message}`);
     }
 
+    try {
+      const predictionBackfillService = require('./services/predictionBackfillService');
+      await predictionBackfillService.runApprovedReasonBackfillOnce();
+    } catch (backfillError) {
+      // Do not block boot for migration failures; keep service available.
+      logger.warn(`Approved reason backfill did not complete: ${backfillError.message}`);
+    }
+
     // Optional hard gate to prevent going live before paper validation proves readiness.
     if (config.nodeEnv === 'production' && config.enforceProductionReadiness) {
       const predictionTrackingService = require('./services/predictionTrackingService');

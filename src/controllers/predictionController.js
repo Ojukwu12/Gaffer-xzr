@@ -22,14 +22,63 @@ const mapConfidenceLevel = (score = 0) => {
   return 'low';
 };
 
-const toPublicPredictionPayload = (prediction) => ({
-  id: prediction._id,
-  marketId: prediction.marketId,
-  status: prediction.status,
-  marketProbability: prediction.marketProbabilityAtTime,
-  aiProbability: prediction.aiProbability,
-  confidence: mapConfidenceLevel(prediction.confidence)
-});
+const clampPercent = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Number(Math.max(0, Math.min(100, numeric)).toFixed(2));
+};
+
+const resolveRecommendedSide = (prediction) => {
+  if (prediction.predictedAnswer === 'YES' || prediction.predictedAnswer === 'NO') {
+    return prediction.predictedAnswer;
+  }
+
+  const yesProbability = clampPercent(prediction.aiProbability);
+  if (yesProbability === null) return null;
+  return yesProbability >= 50 ? 'YES' : 'NO';
+};
+
+const buildRecommendationSummary = ({ marketTitle, recommendedBet, yesProbability, noProbability, reason }) => {
+  const side = recommendedBet || 'N/A';
+  const why = reason || 'No additional reason is available for this prediction yet.';
+  const marketLabel = marketTitle || 'this market';
+  return `Choose ${side} for ${marketLabel} because the model estimates YES at ${yesProbability}% and NO at ${noProbability}%. ${why}`;
+};
+
+const toPublicPredictionPayload = (prediction) => {
+  const yesProbability = clampPercent(prediction.aiProbability);
+  const noProbability = yesProbability === null ? null : clampPercent(100 - yesProbability);
+  const recommendedBet = resolveRecommendedSide(prediction);
+  const reason = predictionModerationService.resolveDisplayReason(prediction);
+
+  return {
+    id: prediction._id || prediction.id,
+    marketId: prediction.marketId,
+    marketTitle: prediction.marketTitle || null,
+    status: prediction.status,
+    option: prediction.option || null,
+    timeframe: prediction.timeframe || null,
+    marketProbability: clampPercent(prediction.marketProbabilityAtTime),
+    aiProbability: yesProbability,
+    probabilities: {
+      yes: yesProbability,
+      no: noProbability
+    },
+    predictedAnswer: prediction.predictedAnswer || null,
+    recommendedBet,
+    confidenceScore: Number.isFinite(Number(prediction.confidence)) ? Number(prediction.confidence) : null,
+    confidence: mapConfidenceLevel(prediction.confidence),
+    reason,
+    recommendationSummary: buildRecommendationSummary({
+      marketTitle: prediction.marketTitle,
+      recommendedBet,
+      yesProbability: yesProbability ?? 'N/A',
+      noProbability: noProbability ?? 'N/A',
+      reason
+    }),
+    polymarketUrl: prediction.polymarketUrl || null
+  };
+};
 
 const toPublicDateLabel = (value) => {
   if (!value) return null;
@@ -214,7 +263,7 @@ const getApprovedPredictionById = asyncHandler(async (req, res) => {
   const prediction = await PredictionRecord.findOne({
     _id: predictionId,
     status: 'approved'
-  }).select('marketId status marketProbabilityAtTime aiProbability confidence');
+  }).select('marketId marketTitle polymarketUrl option timeframe status marketProbabilityAtTime aiProbability predictedAnswer confidence reason');
 
   if (!prediction) {
     throw new CustomError('Approved prediction not found', 404, 'PREDICTION_NOT_FOUND');
