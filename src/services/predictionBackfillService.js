@@ -160,6 +160,21 @@ const runApprovedReasonBackfillOnce = async () => {
   }
 };
 
+const cleanupOldMigrationState = async () => {
+  try {
+    const oldKey = '2026-03-27-approved-reason-backfill-v1';
+    const result = await MigrationState.deleteOne({ key: oldKey });
+    
+    if (result.deletedCount > 0) {
+      logger.info(`Cleaned up old backfill migration state: ${oldKey}`);
+    }
+  } catch (error) {
+    logger.warn(`Could not cleanup old migration state: ${error.message}`);
+    // Non-blocking - continue anyway
+  }
+};
+
 module.exports = {
-  runApprovedReasonBackfillOnce
+  runApprovedReasonBackfillOnce,
+  cleanupOldMigrationState
 };

@@ -247,6 +247,9 @@ const startServer = async () => {
 
     try {
       const predictionBackfillService = require('./services/predictionBackfillService');
+      // Cleanup old migration state first (non-blocking)
+      await predictionBackfillService.cleanupOldMigrationState();
+      // Then run new backfill
       await predictionBackfillService.runApprovedReasonBackfillOnce();
     } catch (backfillError) {
       // Do not block boot for migration failures; keep service available.
