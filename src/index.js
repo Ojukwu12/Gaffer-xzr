@@ -170,15 +170,18 @@ const setupCronJobs = () => {
 
     refreshInProgress = true;
     const refreshDelayMs = randomBetween(config.refreshCronJitterMinMs, config.refreshCronJitterMaxMs);
+    const refreshRunId = `refresh-${Date.now()}`;
 
     try {
-      logger.info(`Running scheduled market refresh with randomized delay (${refreshDelayMs}ms)...`);
+      logger.info(`[cron][refresh][${refreshRunId}] Triggered. Delaying execution by ${refreshDelayMs}ms.`);
       await sleep(refreshDelayMs);
+      logger.info(`[cron][refresh][${refreshRunId}] START`);
       const refreshMarkets = require('./cron/refreshMarkets');
       await refreshMarkets();
+      logger.info(`[cron][refresh][${refreshRunId}] END`);
       global.lastCronRun = new Date().toISOString();
     } catch (error) {
-      logger.error('Scheduled market refresh failed:', error.message);
+      logger.error(`[cron][refresh][${refreshRunId}] FAILED: ${error.message}`);
     } finally {
       refreshInProgress = false;
     }
@@ -193,15 +196,18 @@ const setupCronJobs = () => {
 
     predictionInProgress = true;
     const predictionDelayMs = randomBetween(config.predictionCronJitterMinMs, config.predictionCronJitterMaxMs);
+    const predictionRunId = `predict-${Date.now()}`;
 
     try {
-      logger.info(`Running scheduled prediction computation with randomized delay (${predictionDelayMs}ms)...`);
+      logger.info(`[cron][prediction][${predictionRunId}] Triggered. Delaying execution by ${predictionDelayMs}ms.`);
       await sleep(predictionDelayMs);
+      logger.info(`[cron][prediction][${predictionRunId}] START`);
       const computePredictions = require('./cron/computePredictions');
       await computePredictions();
+      logger.info(`[cron][prediction][${predictionRunId}] END`);
       global.lastCronRun = new Date().toISOString();
     } catch (error) {
-      logger.error('Scheduled prediction computation failed:', error.message);
+      logger.error(`[cron][prediction][${predictionRunId}] FAILED: ${error.message}`);
     } finally {
       predictionInProgress = false;
     }

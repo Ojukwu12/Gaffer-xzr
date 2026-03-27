@@ -29,7 +29,8 @@ const filterExpiredMarkets = (markets) => {
  * Main refresh function
  */
 const refreshMarkets = async () => {
-  logger.info('Starting market refresh job');
+  const runId = `refresh-${Date.now()}`;
+  logger.info(`[refreshMarkets][${runId}] START`);
   
   const startTime = Date.now();
   let fetchedCount = 0;
@@ -64,7 +65,12 @@ const refreshMarkets = async () => {
     
     // Fetch and cache trending markets
     let trendingMarkets = await polymarketService.fetchTrendingMarkets(20).catch(err => {
-      logger.warn(`Failed to fetch trending markets: ${err.message}`);
+      const status = err?.response?.status;
+      if (status === 422) {
+        logger.info(`[refreshMarkets][${runId}] Trending endpoint returned 422; skipping trending cache.`);
+      } else {
+        logger.warn(`[refreshMarkets][${runId}] Failed to fetch trending markets: ${err.message}`);
+      }
       return [];
     });
     
@@ -72,12 +78,12 @@ const refreshMarkets = async () => {
       let parsedTrending = trendingMarkets.map(m => polymarketService.parseMarket(m));
       parsedTrending = filterExpiredMarkets(parsedTrending).slice(0, 10);
       cacheService.cacheMarketList('trending', parsedTrending, 180);
-      logger.info(`Cached ${parsedTrending.length} trending markets (after filtering expired)`);
+      logger.info(`[refreshMarkets][${runId}] Cached ${parsedTrending.length} trending markets (after filtering expired)`);
     }
     
     const duration = Date.now() - startTime;
     
-    logger.info(`Market refresh completed in ${duration}ms: ${cachedCount} markets cached`);
+    logger.info(`[refreshMarkets][${runId}] END in ${duration}ms: ${cachedCount} markets cached (fetched=${fetchedCount})`);
     
     return {
       success: true,
@@ -87,7 +93,7 @@ const refreshMarkets = async () => {
     };
     
   } catch (error) {
-    logger.error('Market refresh job failed:', error);
+    logger.error(`[refreshMarkets][${runId}] FAILED: ${error.message}`);
     throw error;
   }
 };

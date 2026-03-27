@@ -16,7 +16,8 @@ const config = require('../config/env');
  * Main computation function
  */
 const computePredictions = async (options = {}) => {
-  logger.info('Starting prediction computation job');
+  const runId = options.runId || `predict-${Date.now()}`;
+  logger.info(`[computePredictions][${runId}] START`);
   
   const startTime = Date.now();
   let processedCount = 0;
@@ -38,14 +39,26 @@ const computePredictions = async (options = {}) => {
     
     // Fetch active markets
     let markets = await polymarketService.fetchMarkets({ closed: false });
+    const fetchedCount = markets.length;
+    logger.info(`[computePredictions][${runId}] Fetched ${fetchedCount} active markets from Polymarket`);
     
     // Apply minimum liquidity and volume filters
     markets = markets.filter(m => 
-      (m.liquidity || 0) >= config.minLiquidityUsd && 
-      (m.volume24h || 0) >= config.minVolume24hUsd
+      Number(m.liquidity || 0) >= config.minLiquidityUsd && 
+      Number(m.volume24h || m.volume24hr || 0) >= config.minVolume24hUsd
     );
     
-    logger.info(`Filtered ${markets.length} markets by minimum liquidity/volume`);
+    logger.info(
+      `[computePredictions][${runId}] After liquidity/volume filter: ${markets.length}/${fetchedCount} ` +
+      `(minLiquidity=${config.minLiquidityUsd}, minVolume24h=${config.minVolume24hUsd})`
+    );
+
+    if (markets.length === 0) {
+      logger.warn(
+        `[computePredictions][${runId}] No markets passed liquidity/volume filters. ` +
+        'Consider lowering MIN_LIQUIDITY_USD or MIN_VOLUME_24H_USD.'
+      );
+    }
     
     // Group markets by category and select top market per category
     const marketsByCategory = {};
@@ -72,7 +85,28 @@ const computePredictions = async (options = {}) => {
     // Limit to configured max markets
     markets = selectedMarkets.slice(0, config.maxMarketsPerRun);
     
-    logger.info(`Selected ${markets.length} markets across ${Object.keys(marketsByCategory).length} categories (max per category: ${config.marketsPerCategory})`);
+    logger.info(
+      `[computePredictions][${runId}] Selected ${markets.length} markets across ` +
+      `${Object.keys(marketsByCategory).length} categories (maxPerCategory=${config.marketsPerCategory}, maxPerRun=${config.maxMarketsPerRun})`
+    );
+
+    if (markets.length === 0) {
+      const duration = Date.now() - startTime;
+      const emptyResult = {
+        success: true,
+        processed: 0,
+        successful: 0,
+        skipped: 0,
+        skippedReasons,
+        failed: 0,
+        expiredCleanup,
+        notifications: { email: { sent: 0 }, push: { sent: 0 } },
+        duration
+      };
+
+      logger.info(`[computePredictions][${runId}] END in ${duration}ms with 0 selected markets.`);
+      return emptyResult;
+    }
     
     // Process each market
     for (const market of markets) {
@@ -126,7 +160,7 @@ const computePredictions = async (options = {}) => {
     
     // Do not auto-publish prediction notifications here.
     // Notifications are triggered only when an admin approves a prediction.
-    let notificationResults = { email: { sent: 0 }, push: { sent: 0 } };
+    const notificationResults = { email: { sent: 0 }, push: { sent: 0 } };
     if (notifications.length > 0) {
       logger.info('Notification dispatch skipped: predictions require admin approval before publishing');
     }
@@ -148,12 +182,12 @@ const computePredictions = async (options = {}) => {
       duration
     };
     
-    logger.info(`Prediction computation completed in ${duration}ms:`, result);
+    logger.info(`[computePredictions][${runId}] END in ${duration}ms`, result);
     
     return result;
     
   } catch (error) {
-    logger.error('Prediction computation job failed:', error);
+    logger.error(`[computePredictions][${runId}] FAILED: ${error.message}`);
     throw error;
   }
 };
