@@ -18,6 +18,7 @@ const { success } = require('./utils/responseFormatter');
 const { sanitizeInput, blockSuspiciousRequests } = require('./middlewares/security');
 const timeout = require('./middlewares/timeout');
 const metricsService = require('./services/metricsService');
+const User = require('./models/User');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const randomBetween = (minMs, maxMs) => {
@@ -224,6 +225,25 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDB();
     logger.info('Database connected successfully');
+
+    try {
+      const adminUsers = await User.find({ role: 'admin', isActive: true })
+        .select('email')
+        .lean();
+
+      if (!adminUsers.length) {
+        logger.warn('No active admin users found in database. Run npm run setup to create one.');
+      } else {
+        const adminEmails = adminUsers
+          .map((user) => user.email)
+          .filter(Boolean)
+          .join(', ');
+
+        logger.info(`Active admin users (${adminUsers.length}): ${adminEmails}`);
+      }
+    } catch (adminLookupError) {
+      logger.warn(`Could not load admin users during startup: ${adminLookupError.message}`);
+    }
 
     // Optional hard gate to prevent going live before paper validation proves readiness.
     if (config.nodeEnv === 'production' && config.enforceProductionReadiness) {

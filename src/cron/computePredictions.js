@@ -9,7 +9,9 @@ const logger = require('../config/logger');
 const polymarketService = require('../services/polymarketService');
 const predictionEngine = require('../services/predictionEngine');
 const predictionModerationService = require('../services/predictionModerationService');
+const PredictionRecord = require('../models/PredictionRecord');
 const cacheService = require('../services/cacheService');
+const emailService = require('../services/emailService');
 const config = require('../config/env');
 
 /**
@@ -20,6 +22,7 @@ const computePredictions = async (options = {}) => {
   logger.info(`[computePredictions][${runId}] START`);
   
   const startTime = Date.now();
+  const runStartedAt = new Date(startTime);
   let processedCount = 0;
   let successCount = 0;
   let failedCount = 0;
@@ -163,6 +166,40 @@ const computePredictions = async (options = {}) => {
     const notificationResults = { email: { sent: 0 }, push: { sent: 0 } };
     if (notifications.length > 0) {
       logger.info('Notification dispatch skipped: predictions require admin approval before publishing');
+    }
+
+    // Alert admin when new predictions are queued for moderation approval.
+    if (config.adminApprovalAlertEnabled && config.adminEmail) {
+      try {
+        const [newPendingCount, totalPendingCount] = await Promise.all([
+          PredictionRecord.countDocuments({
+            status: 'pending',
+            predictedAt: { $gte: runStartedAt }
+          }),
+          PredictionRecord.countDocuments({ status: 'pending' })
+        ]);
+
+        if (newPendingCount > 0) {
+          await emailService.sendAdminApprovalAlert({
+            to: config.adminEmail,
+            newPendingCount,
+            totalPendingCount,
+            runId,
+            appUrl: process.env.APP_URL || 'http://localhost:5000'
+          });
+
+          logger.info(
+            `[computePredictions][${runId}] Admin alert sent to ${config.adminEmail} ` +
+            `(newPending=${newPendingCount}, totalPending=${totalPendingCount})`
+          );
+        } else {
+          logger.info(`[computePredictions][${runId}] No new pending predictions created; admin alert skipped.`);
+        }
+      } catch (adminAlertError) {
+        logger.warn(`[computePredictions][${runId}] Failed to send admin approval alert: ${adminAlertError.message}`);
+      }
+    } else {
+      logger.info(`[computePredictions][${runId}] Admin approval alert disabled or ADMIN_EMAIL not configured.`);
     }
     
     // Clear expired cache entries

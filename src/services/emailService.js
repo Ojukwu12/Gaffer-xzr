@@ -479,6 +479,80 @@ const sendDailyDigest = async (to, predictions) => {
 };
 
 /**
+ * Sends admin alert that predictions are awaiting moderation approval.
+ * @param {Object} payload - Alert payload
+ * @param {string} payload.to - Admin recipient email
+ * @param {number} payload.newPendingCount - Number of newly created pending predictions in this run
+ * @param {number} payload.totalPendingCount - Total current pending predictions
+ * @param {string} payload.runId - Cron run id
+ * @param {string} payload.appUrl - Base app URL
+ * @returns {Promise<Object>}
+ */
+const sendAdminApprovalAlert = async ({ to, newPendingCount, totalPendingCount, runId, appUrl }) => {
+  const safeRunId = runId || `predict-${Date.now()}`;
+  const adminPanelUrl = `${String(appUrl || 'http://localhost:5000').replace(/\/$/, '')}/api/admin/predictions?status=pending`;
+  const subject = `Admin Action Required: ${newPendingCount} new prediction${newPendingCount === 1 ? '' : 's'} awaiting approval`;
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; }
+    .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+    .header { background: #0f172a; color: #f8fafc; padding: 24px; border-radius: 10px 10px 0 0; }
+    .content { background: #f8fafc; padding: 24px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; }
+    .metric { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 10px 0; }
+    .metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+    .metric-value { font-size: 24px; font-weight: 700; color: #0f172a; }
+    .button { display: inline-block; padding: 12px 22px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2 style="margin: 0;">Prediction Approval Required</h2>
+      <p style="margin: 8px 0 0 0; opacity: 0.9;">Polyscope moderation queue update</p>
+    </div>
+    <div class="content">
+      <p>New predictions are waiting for admin review and approval before publication.</p>
+
+      <div class="metric">
+        <div class="metric-label">New Pending (This Run)</div>
+        <div class="metric-value">${newPendingCount}</div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-label">Total Pending Queue</div>
+        <div class="metric-value">${totalPendingCount}</div>
+      </div>
+
+      <p><strong>Run ID:</strong> ${safeRunId}</p>
+
+      <p style="margin: 24px 0;">
+        <a href="${adminPanelUrl}" class="button">Review Pending Predictions</a>
+      </p>
+
+      <p style="font-size: 12px; color: #64748b;">This alert is sent automatically after prediction computation when new pending items are created.</p>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+
+  const text = [
+    'Polyscope Admin Alert: Prediction approval required',
+    '',
+    `New pending predictions (this run): ${newPendingCount}`,
+    `Total pending queue: ${totalPendingCount}`,
+    `Run ID: ${safeRunId}`,
+    `Review: ${adminPanelUrl}`
+  ].join('\n');
+
+  return sendEmail({ to, subject, html, text });
+};
+
+/**
  * Tests email connection with Brevo API
  * @returns {Promise<boolean>}
  */
@@ -515,6 +589,7 @@ module.exports = {
   sendWelcomeEmail,
   sendHighConfidenceAlert,
   sendDailyDigest,
+  sendAdminApprovalAlert,
   testConnection,
   initializeTransporter
 };

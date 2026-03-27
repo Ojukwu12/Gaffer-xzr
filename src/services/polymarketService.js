@@ -164,12 +164,38 @@ const fetchTraderProfile = async (address) => {
  */
 const fetchTrendingMarkets = async (limit = 10) => {
   logger.info('Fetching trending markets');
-  
-  const response = await polymarketClient.get('/markets/trending', {
-    params: { limit }
-  });
-  
-  return response.data || [];
+
+  try {
+    const response = await polymarketClient.get('/markets/trending', {
+      params: { limit }
+    });
+
+    return response.data || [];
+  } catch (error) {
+    const status = error?.response?.status;
+
+    // Some upstream deployments validate this route as if it were /markets/:id and return 422.
+    // Fallback to a deterministic "trending-like" list from active markets sorted by activity.
+    if (status === 422) {
+      logger.info('Trending endpoint returned 422; falling back to active markets sorted by volume/liquidity');
+      const markets = await fetchMarkets({ closed: false, active: true });
+
+      return (markets || [])
+        .slice()
+        .sort((a, b) => {
+          const volumeA = Number(a.volume24hr || a.volume24h || a.volume || 0);
+          const volumeB = Number(b.volume24hr || b.volume24h || b.volume || 0);
+          if (volumeB !== volumeA) return volumeB - volumeA;
+
+          const liquidityA = Number(a.liquidity || 0);
+          const liquidityB = Number(b.liquidity || 0);
+          return liquidityB - liquidityA;
+        })
+        .slice(0, Math.max(1, Number(limit) || 10));
+    }
+
+    throw error;
+  }
 };
 
 /**

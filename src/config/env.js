@@ -69,6 +69,10 @@ const config = {
   // Notification Configuration
   notificationThreshold: parseInt(process.env.NOTIFICATION_THRESHOLD || '10', 10),
 
+  // Admin notification targets
+  adminEmail: process.env.ADMIN_EMAIL || '',
+  adminApprovalAlertEnabled: String(process.env.ADMIN_APPROVAL_ALERT_ENABLED || 'true').toLowerCase() === 'true',
+
   // Lightweight admin secret header for sensitive admin actions
   adminSecretKey: process.env.ADMIN_SECRET_KEY || '',
   
