@@ -504,7 +504,7 @@ Get system metrics
 - **Prediction endpoints**: 50 prediction requests per 5 minutes per IP
 - **Admin/sensitive endpoints**: 20 requests per 5 minutes per IP
 
-External API adapters also apply outbound provider-specific pacing (SportsDataIO, Football-Data, CoinGecko, Yahoo Finance, GDELT, NewsAPI, SEC EDGAR, and Earnings API) to reduce upstream throttling risk.
+External API adapters also apply outbound provider-specific pacing (TheSportsDB, Football-Data, CoinGecko, Yahoo Finance, GDELT, NewsAPI, SEC EDGAR, and Earnings API) to reduce upstream throttling risk.
 
 Rate limit headers are included in responses:
 ```

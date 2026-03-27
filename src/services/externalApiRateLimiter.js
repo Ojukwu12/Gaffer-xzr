@@ -7,7 +7,7 @@
 const config = require('../config/env');
 
 const providerIntervals = {
-  sportsDataIo: Number(config.sportsDataIoMinIntervalMs || 300),
+  theSportsDb: Number(config.theSportsDbMinIntervalMs || 700),
   footballData: Number(config.footballDataMinIntervalMs || 500),
   coinGecko: Number(config.coinGeckoMinIntervalMs || 1200),
   yahooFinance: Number(config.yahooFinanceMinIntervalMs || 400),

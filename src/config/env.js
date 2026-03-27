@@ -21,8 +21,8 @@ const config = {
   polymarketApiBase: process.env.POLYMARKET_API_BASE || 'https://gamma-api.polymarket.com',
 
   // External Data APIs (sports + financial)
-  sportsDataIoApiKey: process.env.SPORTSDATAIO_API_KEY || '',
-  sportsDataIoBaseUrl: process.env.SPORTSDATAIO_BASE_URL || 'https://api.sportsdata.io',
+  theSportsDbApiKey: process.env.THESPORTSDB_API_KEY || '3',
+  theSportsDbBaseUrl: process.env.THESPORTSDB_BASE_URL || 'https://www.thesportsdb.com/api/v1/json',
   footballDataApiKey: process.env.FOOTBALL_DATA_API_KEY || '',
   footballDataBaseUrl: process.env.FOOTBALL_DATA_BASE_URL || 'https://api.football-data.org/v4',
   coinGeckoBaseUrl: process.env.COINGECKO_BASE_URL || 'https://api.coingecko.com/api/v3',
@@ -118,7 +118,7 @@ const config = {
   llmRateLimitThreshold: parseInt(process.env.LLM_RATE_LIMIT_THRESHOLD || '3', 10),
 
   // Outbound external API rate limiting (minimum interval between provider calls)
-  sportsDataIoMinIntervalMs: parseInt(process.env.SPORTSDATAIO_MIN_INTERVAL_MS || '300', 10),
+  theSportsDbMinIntervalMs: parseInt(process.env.THESPORTSDB_MIN_INTERVAL_MS || '700', 10),
   footballDataMinIntervalMs: parseInt(process.env.FOOTBALL_DATA_MIN_INTERVAL_MS || '500', 10),
   coinGeckoMinIntervalMs: parseInt(process.env.COINGECKO_MIN_INTERVAL_MS || '1200', 10),
   yahooFinanceMinIntervalMs: parseInt(process.env.YAHOO_FINANCE_MIN_INTERVAL_MS || '400', 10),

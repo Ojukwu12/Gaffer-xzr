@@ -229,49 +229,119 @@ const getCacheKey = (marketData, classification) => {
   return `external-layer:${marketId}:${classification}`;
 };
 
-const fetchSportsDataIoData = async ({ teamA, teamB, sportType }) => {
-  if (!config.sportsDataIoApiKey || !teamA) return null;
+const normalizeTeamName = (value = '') => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9 ]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
-  const client = axios.create({
-    baseURL: config.sportsDataIoBaseUrl,
-    timeout: 12000,
-    headers: {
-      'Ocp-Apim-Subscription-Key': config.sportsDataIoApiKey
-    }
-  });
+const resolveTheSportsDbTeam = async (client, apiKey, teamName) => {
+  if (!teamName) return null;
 
-  // Endpoint shapes vary by sport and plan. We keep this resilient and optional.
-  const tryRequests = [
-    `/v3/${sportType}/scores/json/Teams`,
-    `/v3/${sportType}/scores/json/Players`
-  ];
+  try {
+    const response = await externalApiRateLimiter.schedule('theSportsDb', () =>
+      client.get(`/${encodeURIComponent(apiKey)}/searchteams.php`, {
+        params: { t: teamName }
+      })
+    );
 
-  const results = [];
-  for (const endpoint of tryRequests) {
-    try {
-      const response = await externalApiRateLimiter.schedule('sportsDataIo', () => client.get(endpoint));
-      results.push({ endpoint, data: response.data });
-    } catch (error) {
-      logger.debug('SportsDataIO endpoint failed', { endpoint, error: error.message });
-    }
+    const teams = response.data?.teams || [];
+    if (!teams.length) return null;
+
+    const normalizedInput = normalizeTeamName(teamName);
+    const exactMatch = teams.find((team) => normalizeTeamName(team.strTeam) === normalizedInput);
+    return exactMatch || teams[0];
+  } catch (error) {
+    logger.debug('TheSportsDB team resolution failed', { teamName, error: error.message });
+    return null;
   }
+};
 
-  if (!results.length) return null;
+const mapTheSportsDbEvent = (event, teamAName) => {
+  const homeTeam = String(event?.strHomeTeam || '');
+  const awayTeam = String(event?.strAwayTeam || '');
 
-  // SportsDataIO returns rich league-level data. We use it as a team metadata/injury source.
-  const players = results.find((r) => r.endpoint.includes('Players'))?.data || [];
-  const injuries = players.filter((p) => {
-    const team = String(p.Team || p.team || '').toLowerCase();
-    const status = String(p.InjuryStatus || p.Status || '').toLowerCase();
-    return team.includes(String(teamA).toLowerCase()) && status && status !== 'active';
-  });
+  const normalizedHome = normalizeTeamName(homeTeam);
+  const normalizedAway = normalizeTeamName(awayTeam);
+  const normalizedTeamA = normalizeTeamName(teamAName);
+
+  const isHome = normalizedHome === normalizedTeamA;
+  const isAway = normalizedAway === normalizedTeamA;
+  if (!isHome && !isAway) return null;
+
+  const homeScore = Number.parseInt(event?.intHomeScore, 10);
+  const awayScore = Number.parseInt(event?.intAwayScore, 10);
+  const hasScores = Number.isFinite(homeScore) && Number.isFinite(awayScore);
+
+  const goalsFor = hasScores ? (isHome ? homeScore : awayScore) : 0;
+  const goalsAgainst = hasScores ? (isHome ? awayScore : homeScore) : 0;
+  const isDraw = hasScores ? goalsFor === goalsAgainst : false;
+  const isWin = hasScores ? goalsFor > goalsAgainst : false;
 
   return {
-    source: 'SportsDataIO',
-    injuredCount: injuries.length,
-    fixtures: [],
-    recentMatches: [],
-    headToHeadMatches: []
+    isHome,
+    isWin,
+    isDraw,
+    goalsFor,
+    goalsAgainst,
+    homeTeam,
+    awayTeam
+  };
+};
+
+const fetchTheSportsDbSnapshot = async ({ teamA, teamB }) => {
+  if (!teamA) return null;
+
+  const apiKey = String(config.theSportsDbApiKey || '3').trim();
+  if (!apiKey) return null;
+
+  const client = axios.create({
+    baseURL: config.theSportsDbBaseUrl,
+    timeout: 12000
+  });
+
+  const teamAObj = await resolveTheSportsDbTeam(client, apiKey, teamA);
+  if (!teamAObj?.idTeam) return null;
+
+  const [recentResponse, nextResponse] = await Promise.all([
+    externalApiRateLimiter.schedule('theSportsDb', () =>
+      client.get(`/${encodeURIComponent(apiKey)}/eventslast.php`, {
+        params: { id: teamAObj.idTeam }
+      })
+    ).catch(() => ({ data: {} })),
+    externalApiRateLimiter.schedule('theSportsDb', () =>
+      client.get(`/${encodeURIComponent(apiKey)}/eventsnext.php`, {
+        params: { id: teamAObj.idTeam }
+      })
+    ).catch(() => ({ data: {} }))
+  ]);
+
+  const recentMatches = (recentResponse.data?.results || [])
+    .map((event) => mapTheSportsDbEvent(event, teamAObj.strTeam || teamA))
+    .filter(Boolean)
+    .slice(0, 5);
+
+  const upcomingFixtures = (nextResponse.data?.events || []).slice(0, 3);
+
+  const normalizedTeamB = normalizeTeamName(teamB);
+  const headToHeadMatches = normalizedTeamB
+    ? recentMatches
+      .filter((match) => {
+        const home = normalizeTeamName(match.homeTeam);
+        const away = normalizeTeamName(match.awayTeam);
+        return home === normalizedTeamB || away === normalizedTeamB;
+      })
+      .map((match) => ({
+        teamAResult: match.isDraw ? 'draw' : match.isWin ? 'win' : 'loss'
+      }))
+    : [];
+
+  return {
+    source: 'TheSportsDB',
+    recentMatches,
+    fixtures: upcomingFixtures,
+    headToHeadMatches,
+    injuredCount: 0
   };
 };
 
@@ -565,10 +635,9 @@ const buildSportsLayer = async (marketData) => {
   const teams = extractTeamsFromMarket(marketData);
   const sportType = detectSportType(marketData);
 
-  const primary = await fetchSportsDataIoData({
+  const freeProvider = await fetchTheSportsDbSnapshot({
     teamA: teams.teamA,
-    teamB: teams.teamB,
-    sportType
+    teamB: teams.teamB
   });
 
   const secondary = await fetchFootballDataSnapshot({
@@ -576,7 +645,7 @@ const buildSportsLayer = async (marketData) => {
     teamB: teams.teamB
   });
 
-  const chosen = secondary || primary;
+  const chosen = freeProvider || secondary;
   if (!chosen) {
     return {
       ...buildDefaultLayer('sports'),

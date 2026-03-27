@@ -206,20 +206,20 @@ async function checkExternalSourceHealth() {
     sources: {}
   };
   
-  // Check sports data (SportsDataIO)
+  // Check sports data (TheSportsDB)
   try {
     const startTime = Date.now();
-    // Simple connectivity check - just see if we can reach the API
-    if (config.sportsDataIoApiKey && config.sportsDataIoApiKey !== 'your_sportsdata_api_key') {
-      await externalApiRateLimiter.schedule('sportsDataIo', () =>
-        axios.get('https://api.sportsdataio.com/v3/nba/scores/json/teams', {
-          params: { key: config.sportsDataIoApiKey },
+    const theSportsDbKey = String(config.theSportsDbApiKey || '').trim();
+    if (theSportsDbKey) {
+      await externalApiRateLimiter.schedule('theSportsDb', () =>
+        axios.get(`${config.theSportsDbBaseUrl}/${encodeURIComponent(theSportsDbKey)}/all_sports.php`, {
           timeout: 5000
         })
       );
       const responseTime = Date.now() - startTime;
       healthCheck.sources.sports = {
         status: 'healthy',
+        provider: 'TheSportsDB',
         responseTime,
         lastCheck: new Date()
       };
