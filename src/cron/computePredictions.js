@@ -62,10 +62,26 @@ const computePredictions = async (options = {}) => {
         'Consider lowering MIN_LIQUIDITY_USD or MIN_VOLUME_24H_USD.'
       );
     }
+
+    // Get recently attempted markets (last 2 hours) to avoid re-predicting same ones immediately
+    const twHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const recentlyAttempted = await PredictionRecord.find({
+      predictedAt: { $gte: twHoursAgo }
+    }).select('marketId').lean();
     
-    // Group markets by category and select top market per category
+    const recentMarketIds = new Set(recentlyAttempted.map(r => r.marketId));
+    
+    // Filter out recently attempted markets to allow market rotation
+    const freshMarkets = markets.filter(m => !recentMarketIds.has(m.marketId));
+    
+    logger.info(
+      `[computePredictions][${runId}] After recent-attempt dedup: ${freshMarkets.length}/${markets.length} fresh markets ` +
+      `(skipped ${recentMarketIds.size} recently attempted markets)`
+    );
+    
+    // Group fresh markets by category and select top markets per category
     const marketsByCategory = {};
-    for (const market of markets) {
+    for (const market of freshMarkets) {
       const category = market.category || 'Other';
       if (!marketsByCategory[category]) {
         marketsByCategory[category] = [];
@@ -73,16 +89,14 @@ const computePredictions = async (options = {}) => {
       marketsByCategory[category].push(market);
     }
     
-    // Get top market per category (sorted by liquidity)
+    // Get top N markets per category (sorted by liquidity, pick multiple for rotation)
     const selectedMarkets = [];
     for (const category in marketsByCategory) {
-      const topMarket = marketsByCategory[category]
+      const topMarkets = marketsByCategory[category]
         .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
-        .slice(0, config.marketsPerCategory)[0];
+        .slice(0, Math.max(3, config.marketsPerCategory)); // Pick at least top 3 per category
       
-      if (topMarket) {
-        selectedMarkets.push(topMarket);
-      }
+      selectedMarkets.push(...topMarkets);
     }
     
     // Limit to configured max markets
@@ -90,7 +104,8 @@ const computePredictions = async (options = {}) => {
     
     logger.info(
       `[computePredictions][${runId}] Selected ${markets.length} markets across ` +
-      `${Object.keys(marketsByCategory).length} categories (maxPerCategory=${config.marketsPerCategory}, maxPerRun=${config.maxMarketsPerRun})`
+      `${Object.keys(marketsByCategory).length} categories ` +
+      `(rotation picks top 3+ markets per category, maxPerRun=${config.maxMarketsPerRun})`
     );
 
     if (markets.length === 0) {
