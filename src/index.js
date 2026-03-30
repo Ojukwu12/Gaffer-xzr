@@ -6,7 +6,6 @@
 
 const express = require('express');
 const path = require('path');
-const crypto = require('crypto');
 const helmet = require('helmet');
 const cors = require('cors');
 const { corsOptions } = require('./config/cors');
@@ -42,10 +41,28 @@ const ensureEnvAdminUser = async () => {
   let user = await User.findOne({ email: configuredEmail });
 
   if (!user) {
-    const apiKey = configuredApiKey || crypto.randomBytes(32).toString('hex');
+    if (!configuredApiKey) {
+      logger.warn(
+        `ADMIN_EMAIL (${configuredEmail}) is set but ADMIN_API_KEY is missing. ` +
+        'Skipping admin user creation to avoid generating unexpected credentials.'
+      );
+      return;
+    }
+
+    const apiKeyOwner = await User.findOne({ apiKey: configuredApiKey })
+      .select('email')
+      .lean();
+
+    if (apiKeyOwner && apiKeyOwner.email !== configuredEmail) {
+      logger.warn(
+        `Cannot create ADMIN_EMAIL user (${configuredEmail}) because ADMIN_API_KEY is already assigned to ${apiKeyOwner.email}.`
+      );
+      return;
+    }
+
     user = await User.create({
       email: configuredEmail,
-      apiKey,
+      apiKey: configuredApiKey,
       role: 'admin',
       isActive: true,
       metadata: {
@@ -53,17 +70,7 @@ const ensureEnvAdminUser = async () => {
       }
     });
 
-    logger.warn(
-      `Created admin user from ADMIN_EMAIL (${configuredEmail}). ` +
-      `${configuredApiKey ? 'Using ADMIN_API_KEY from env.' : 'Generated API key automatically.'}`
-    );
-
-    if (!configuredApiKey) {
-      logger.warn(
-        'ADMIN_API_KEY is not set. A random admin API key was generated. ' +
-        'Set ADMIN_API_KEY in env to make admin auth deterministic across restarts.'
-      );
-    }
+    logger.info(`Created admin user from ADMIN_EMAIL (${configuredEmail}) using ADMIN_API_KEY from env.`);
 
     return;
   }
@@ -71,7 +78,25 @@ const ensureEnvAdminUser = async () => {
   const updates = {};
   if (user.role !== 'admin') updates.role = 'admin';
   if (!user.isActive) updates.isActive = true;
-  if (configuredApiKey && user.apiKey !== configuredApiKey) updates.apiKey = configuredApiKey;
+
+  if (configuredApiKey) {
+    const apiKeyOwner = await User.findOne({ apiKey: configuredApiKey })
+      .select('email')
+      .lean();
+
+    if (apiKeyOwner && apiKeyOwner.email !== configuredEmail) {
+      logger.warn(
+        `ADMIN_API_KEY is already assigned to ${apiKeyOwner.email}. ` +
+        `Skipping API key update for ADMIN_EMAIL (${configuredEmail}).`
+      );
+    } else if (user.apiKey !== configuredApiKey) {
+      updates.apiKey = configuredApiKey;
+    }
+  } else {
+    logger.warn(
+      `ADMIN_API_KEY not set; keeping existing API key for ADMIN_EMAIL (${configuredEmail}).`
+    );
+  }
 
   if (Object.keys(updates).length > 0) {
     await User.updateOne({ _id: user._id }, { $set: updates });

@@ -292,6 +292,7 @@ ADMIN_EMAIL=admin@polyscope.app
 # Startup behavior:
 # - If ADMIN_EMAIL is set, backend syncs that email to an active admin user in DB.
 # - If ADMIN_API_KEY is set, it is applied to that admin user during startup sync.
+# - Backend does not generate random admin API keys during startup sync.
 
 # Web Push (Optional)
 WEB_PUSH_VAPID_PUBLIC=your_public_key

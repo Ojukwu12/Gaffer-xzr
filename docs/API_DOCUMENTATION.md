@@ -23,6 +23,7 @@ Notes:
 - `/api/metrics` uses `X-API-Key` only (not `x-admin-key`).
 - `ADMIN_EMAIL` is synced at startup: if configured, the backend ensures that email exists as an active `admin` user in DB.
 - If `ADMIN_API_KEY` is set, startup sync also aligns that admin user's API key with `ADMIN_API_KEY`.
+- Startup sync does not generate random admin API keys; admin key material is expected from env (`ADMIN_API_KEY`, `ADMIN_SECRET_KEY`).
 
 Admin debug example:
 ```bash

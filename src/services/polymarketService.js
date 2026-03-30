@@ -216,12 +216,60 @@ const fetchMarketsByCategory = async (category) => {
  */
 const searchMarkets = async (query) => {
   logger.info(`Searching markets: ${query}`);
-  
-  const response = await polymarketClient.get('/markets/search', {
-    params: { q: query }
-  });
-  
-  return response.data || [];
+
+  try {
+    const response = await polymarketClient.get('/markets/search', {
+      params: { q: query }
+    });
+
+    return response.data || [];
+  } catch (error) {
+    const status = error?.response?.status;
+
+    // Some upstream deployments validate this route as if it were /markets/:id and return 422.
+    // Fallback to client-side filtering of active markets so search remains available.
+    if (status === 422) {
+      logger.info('Search endpoint returned 422; falling back to active markets local filtering');
+      const normalizedQuery = String(query || '').trim().toLowerCase();
+      if (!normalizedQuery) return [];
+
+      const markets = await fetchMarkets({ closed: false, active: true });
+
+      const getSearchScore = (market) => {
+        const title = String(market.question || market.title || '').toLowerCase();
+        const description = String(market.description || '').toLowerCase();
+        const slug = String(market.slug || market.market_slug || '').toLowerCase();
+        const tags = Array.isArray(market.tags)
+          ? market.tags.map((t) => String(t).toLowerCase()).join(' ')
+          : '';
+
+        if (title.startsWith(normalizedQuery)) return 4;
+        if (title.includes(normalizedQuery)) return 3;
+        if (slug.includes(normalizedQuery)) return 2;
+        if (description.includes(normalizedQuery) || tags.includes(normalizedQuery)) return 1;
+        return 0;
+      };
+
+      return (markets || [])
+        .map((market) => ({ market, score: getSearchScore(market) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+
+          const volumeA = Number(a.market.volume24hr || a.market.volume24h || a.market.volume || 0);
+          const volumeB = Number(b.market.volume24hr || b.market.volume24h || b.market.volume || 0);
+          if (volumeB !== volumeA) return volumeB - volumeA;
+
+          const liquidityA = Number(a.market.liquidity || 0);
+          const liquidityB = Number(b.market.liquidity || 0);
+          return liquidityB - liquidityA;
+        })
+        .map((entry) => entry.market)
+        .slice(0, 100);
+    }
+
+    throw error;
+  }
 };
 
 /**

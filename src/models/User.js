@@ -97,7 +97,6 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ isActive: 1 });
 userSchema.index({ 'preferences.watchedMarkets': 1 });
 userSchema.index({ createdAt: -1 });
-userSchema.index({ apiKey: 1 });
 userSchema.index({ role: 1 });
 
 /**
