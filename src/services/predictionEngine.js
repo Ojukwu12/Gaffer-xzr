@@ -973,13 +973,14 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     // Ensure polymarketUrl is present; regenerate if missing
     let cachedMarketData = cacheService.getCachedMarket(marketId);
     const slug = cachedMarketData?.slug || null;
+    const eventSlug = cachedMarketData?.eventSlug || null;
     return {
       ...cached,
       fromCache: true,
       marketId,
       option,
       timeframe,
-      polymarketUrl: cached.polymarketUrl || polymarketService.getMarketUrl({ marketId, slug })
+      polymarketUrl: cached.polymarketUrl || polymarketService.getMarketUrl({ marketId, slug, eventSlug })
     };
   }
   
@@ -1044,7 +1045,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   const marketSummary = generateMarketSummary(features, marketData, option);
   const polymarketUrl = polymarketService.getMarketUrl({
     marketId,
-    slug: marketData.slug || null
+    slug: marketData.slug || null,
+    eventSlug: marketData.eventSlug || null
   });
   
   // Construct final prediction object with the main answer (YES/NO)
@@ -1199,7 +1201,8 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   const marketSummary = generateMarketSummary(features, marketData, representativeOption);
   const polymarketUrl = polymarketService.getMarketUrl({
     marketId,
-    slug: marketData.slug || null
+    slug: marketData.slug || null,
+    eventSlug: marketData.eventSlug || null
   });
   
   // Construct final unified prediction object

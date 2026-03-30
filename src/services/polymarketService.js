@@ -289,8 +289,10 @@ const parseArrayField = (value) => {
 
 const toNumericArray = (values) => {
   return parseArrayField(values)
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
+    .map((value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    });
 };
 
 const normalizeOptionLabels = (options) => {
@@ -328,11 +330,16 @@ const parseMarket = (rawMarket) => {
 
   const title = rawMarket.question || rawMarket.title;
   const options = normalizeOptionLabels(rawMarket.outcomes || rawMarket.options || ['Yes', 'No']);
-  const currentPrices = toNumericArray(rawMarket.outcome_prices || rawMarket.prices || []);
+  const currentPrices = toNumericArray(rawMarket.outcomePrices || rawMarket.outcome_prices || rawMarket.prices || []);
   
   // Use Gamma slug if available, otherwise generate from title
   // This ensures we always have a slug for Polymarket's /event/ URLs
-  const slug = rawMarket.slug || rawMarket.market_slug || generateSlug(title) || null;
+  const slug = rawMarket.slug || rawMarket.marketSlug || rawMarket.market_slug || generateSlug(title) || null;
+  const eventSlug =
+    rawMarket.eventSlug ||
+    rawMarket.event_slug ||
+    (Array.isArray(rawMarket.events) && rawMarket.events[0] && rawMarket.events[0].slug) ||
+    null;
 
   const optionPricePairs = options.map((option, index) => ({
     option,
@@ -343,10 +350,12 @@ const parseMarket = (rawMarket) => {
   const noPair = optionPricePairs.find((entry) => entry.option.toLowerCase() === 'no');
 
   return {
-    marketId: rawMarket.condition_id || rawMarket.id,
+    marketId: rawMarket.conditionId || rawMarket.condition_id || rawMarket.id,
+    conditionId: rawMarket.conditionId || rawMarket.condition_id || rawMarket.id,
     title,
     description: rawMarket.description || '',
     options,
+    outcomes: options,
     status: rawMarket.closed ? 'closed' : 'active',
     liquidity: rawMarket.liquidity || 0,
     volume: rawMarket.volume || 0,
@@ -355,8 +364,10 @@ const parseMarket = (rawMarket) => {
     createdAt: rawMarket.created_at || rawMarket.createdAt,
     endDate: rawMarket.end_date_iso || rawMarket.endDate,
     currentPrices,
+    outcomePrices: currentPrices,
     yesPrice: yesPair ? yesPair.price : null,
     noPrice: noPair ? noPair.price : null,
+    eventSlug,
     image,
     slug,
     closed: rawMarket.closed || false
@@ -399,9 +410,15 @@ const validateMarket = (market) => {
  * @param {Object} market - Market object
  * @param {string} market.marketId - Market ID
  * @param {string|null} market.slug - Market slug
+ * @param {string|null} market.eventSlug - Event slug
  * @returns {string}
  */
-const getMarketUrl = ({ marketId, slug }) => {
+const getMarketUrl = ({ marketId, slug, eventSlug }) => {
+  // For many markets, Polymarket's canonical path is event-based.
+  if (eventSlug) {
+    return `https://polymarket.com/event/${encodeURIComponent(eventSlug)}`;
+  }
+
   if (slug) {
     return `https://polymarket.com/event/${encodeURIComponent(slug)}`;
   }

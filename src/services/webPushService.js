@@ -73,7 +73,8 @@ const sendPredictionPush = async (subscription, prediction, market) => {
   const polymarketService = require('./polymarketService');
   const marketUrl = polymarketService.getMarketUrl({
     marketId: market.marketId,
-    slug: market.slug || null
+    slug: market.slug || null,
+    eventSlug: market.eventSlug || null
   });
   
   const payload = {

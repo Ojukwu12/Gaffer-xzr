@@ -303,7 +303,8 @@ const runStartupMigrations = async () => {
           marketSlug: marketData.slug,
           polymarketUrl: polymarketService.getMarketUrl({
             marketId: prediction.marketId,
-            slug: marketData.slug
+            slug: marketData.slug,
+            eventSlug: marketData.eventSlug || null
           }),
           marketTitle: marketData.title || prediction.marketTitle
         };
