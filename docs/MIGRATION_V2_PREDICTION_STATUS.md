@@ -149,17 +149,23 @@ A database migration runs **automatically on server startup** to update existing
 npm start
 
 # The migration will run in the background and:
-# ✓ Update all pending and approved predictions
-# ✓ Populate marketSlug from slugified titles  
+# ✓ Update all prediction records (all statuses)
+# ✓ Populate/repair marketSlug from fetched market metadata
 # ✓ Generate correct polymarketUrl using /event/{slug} format
+# ✓ Update PredictionCache prediction.polymarketUrl entries
 # ✓ Record completion in MigrationState collection
 # ✓ Can be safely re-run multiple times (idempotent)
 ```
 
 **Expected startup log:**
 ```
-✓ Startup migration completed: updated 89/127 predictions
+✓ Startup migration completed: updated X/Y predictions, updated A/B cached predictions
 ```
+
+Note about markets:
+- Market links shown in market list/details are generated from live Polymarket/Gamma fetch + in-memory cache.
+- There is no persistent MongoDB `markets` collection to migrate.
+- After deploy/restart, market responses will use the latest link-generation logic automatically.
 
 ### Manual Migration (Optional)
 

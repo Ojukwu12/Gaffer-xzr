@@ -75,6 +75,18 @@ const pushSubscriptionSchema = new mongoose.Schema({
       type: Boolean,
       default: true
     },
+
+    // Notify when subscribed markets resolve
+    notifyOnResolution: {
+      type: Boolean,
+      default: true
+    },
+
+    // Send a weekly performance digest push
+    notifyWeeklyDigest: {
+      type: Boolean,
+      default: true
+    },
     
     // Minimum change percentage to notify
     minChangePercent: {

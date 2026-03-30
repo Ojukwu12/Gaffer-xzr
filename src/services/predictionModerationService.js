@@ -485,7 +485,7 @@ const markExpiredPredictions = async ({ limit = 500 } = {}) => {
   }).limit(limit);
 
   if (candidates.length === 0) {
-    return { scanned: 0, expired: 0 };
+    return { scanned: 0, expired: 0, resolvedPredictions: [] };
   }
 
   const byMarket = new Map();
@@ -501,6 +501,7 @@ const markExpiredPredictions = async ({ limit = 500 } = {}) => {
   }));
 
   let expiredCount = 0;
+  const resolvedPredictions = [];
 
   for (const record of candidates) {
     const market = byMarket.get(record.marketId);
@@ -524,6 +525,18 @@ const markExpiredPredictions = async ({ limit = 500 } = {}) => {
 
     await record.save();
 
+    resolvedPredictions.push({
+      id: record._id,
+      marketId: record.marketId,
+      marketTitle: record.marketTitle,
+      polymarketUrl: record.polymarketUrl || null,
+      predictedAnswer: record.predictedAnswer || null,
+      actualAnswer: record.actualAnswer || null,
+      finalMarketResult: record.finalMarketResult || null,
+      isCorrect: typeof record.isCorrect === 'boolean' ? record.isCorrect : null,
+      resolvedAt: record.resolvedAt || record.expiredAt || new Date()
+    });
+
     if (record.actualAnswer && typeof record.aiProbability === 'number') {
       try {
         await mlTrainingDataService.storeTrainingEntry(record, 'expiry_cleanup');
@@ -545,7 +558,8 @@ const markExpiredPredictions = async ({ limit = 500 } = {}) => {
 
   return {
     scanned: candidates.length,
-    expired: expiredCount
+    expired: expiredCount,
+    resolvedPredictions
   };
 };
 

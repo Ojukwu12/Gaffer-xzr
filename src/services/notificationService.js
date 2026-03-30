@@ -13,6 +13,14 @@ const webPushService = require('./webPushService');
 const webhookService = require('./webhookService');
 const metricsService = require('./metricsService');
 
+const toYesNo = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().toUpperCase();
+  if (['YES', 'TRUE', '1'].includes(normalized)) return 'YES';
+  if (['NO', 'FALSE', '0'].includes(normalized)) return 'NO';
+  return normalized;
+};
+
 /**
  * Sends notification for a prediction
  * @param {string} marketId - Market ID
@@ -304,10 +312,124 @@ const cleanupSubscriptions = async () => {
   };
 };
 
+/**
+ * Sends push notifications for recently resolved markets
+ * @param {Array} resolvedPredictions - Resolved prediction records from expiry cleanup
+ * @returns {Promise<Object>}
+ */
+const sendMarketResolvedPushNotifications = async (resolvedPredictions = []) => {
+  if (!Array.isArray(resolvedPredictions) || resolvedPredictions.length === 0) {
+    return { sent: 0, failed: 0, markets: 0 };
+  }
+
+  const results = { sent: 0, failed: 0, markets: 0 };
+  const byMarket = new Map();
+
+  for (const item of resolvedPredictions) {
+    if (!item || !item.marketId) continue;
+    if (!byMarket.has(item.marketId)) {
+      byMarket.set(item.marketId, item);
+    }
+  }
+
+  for (const [marketId, item] of byMarket.entries()) {
+    results.markets++;
+
+    const subscriptions = await PushSubscription.findActiveByMarket(marketId);
+
+    for (const subscription of subscriptions) {
+      // Default behavior: notify on resolution unless explicitly disabled
+      if (subscription.preferences && subscription.preferences.notifyOnResolution === false) {
+        continue;
+      }
+
+      if (!subscription.canReceiveNotification()) {
+        continue;
+      }
+
+      try {
+        await webPushService.sendMarketResolvedPush(subscription.subscription, {
+          marketId,
+          marketTitle: item.marketTitle || `Market ${marketId}`,
+          finalResult: toYesNo(item.actualAnswer || item.finalMarketResult) || 'resolved',
+          url: item.polymarketUrl || 'https://polymarket.com'
+        });
+
+        await subscription.incrementNotificationCount();
+        metricsService.recordNotification('push', true);
+        results.sent++;
+      } catch (err) {
+        metricsService.recordNotification('push', false);
+        await subscription.recordFailure(err.message);
+        results.failed++;
+        logger.warn(`Resolved market push failed for ${marketId}: ${err.message}`);
+      }
+    }
+  }
+
+  return results;
+};
+
+/**
+ * Sends weekly push digest to subscribers who opted in
+ * @param {Object} options - digest options
+ * @returns {Promise<Object>}
+ */
+const sendWeeklyPushDigest = async (options = {}) => {
+  const windowDays = Number(options.windowDays || 7);
+  const predictionTrackingService = require('./predictionTrackingService');
+  const performance = await predictionTrackingService.getPredictionPerformance(windowDays);
+
+  const resolved = Number(performance?.summary?.resolvedPredictions || 0);
+  const correct = Number(performance?.summary?.correctPredictions || 0);
+  const winRate = Number(performance?.summary?.winRate || 0);
+
+  const subscriptions = await PushSubscription.find({
+    isActive: true,
+    failureCount: { $lt: 5 }
+  });
+
+  const results = { sent: 0, failed: 0, checked: subscriptions.length };
+
+  for (const subscription of subscriptions) {
+    // Default behavior: send weekly digest unless explicitly disabled
+    if (subscription.preferences && subscription.preferences.notifyWeeklyDigest === false) {
+      continue;
+    }
+
+    if (!subscription.canReceiveNotification()) {
+      continue;
+    }
+
+    try {
+      await webPushService.sendWeeklyDigestPush(subscription.subscription, {
+        windowDays,
+        resolved,
+        correct,
+        winRate,
+        url: 'https://polymarket.com'
+      });
+
+      await subscription.incrementNotificationCount();
+      metricsService.recordNotification('push', true);
+      results.sent++;
+    } catch (err) {
+      metricsService.recordNotification('push', false);
+      await subscription.recordFailure(err.message);
+      results.failed++;
+      logger.warn(`Weekly digest push failed: ${err.message}`);
+    }
+  }
+
+  return results;
+};
+
 module.exports = {
   sendPredictionNotification,
   sendEmailNotifications,
   sendPushNotifications,
+  sendMarketResolvedPushNotifications,
+  sendWeeklyPushDigest,
   sendTestNotification,
   sendBulkNotifications,
   cleanupSubscriptions

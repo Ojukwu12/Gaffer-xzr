@@ -12,6 +12,7 @@ const predictionModerationService = require('../services/predictionModerationSer
 const PredictionRecord = require('../models/PredictionRecord');
 const cacheService = require('../services/cacheService');
 const emailService = require('../services/emailService');
+const notificationService = require('../services/notificationService');
 const config = require('../config/env');
 
 /**
@@ -39,6 +40,21 @@ const computePredictions = async (options = {}) => {
 
     // Keep lifecycle integrity: move ended markets to expired status with outcomes.
     expiredCleanup = await predictionModerationService.markExpiredPredictions({ limit: 1000 });
+
+    // Send push notifications for newly resolved markets (if any)
+    if (expiredCleanup && Array.isArray(expiredCleanup.resolvedPredictions) && expiredCleanup.resolvedPredictions.length > 0) {
+      try {
+        const resolvedPush = await notificationService.sendMarketResolvedPushNotifications(
+          expiredCleanup.resolvedPredictions
+        );
+        logger.info(
+          `[computePredictions][${runId}] Resolved market push notifications: ` +
+          `sent=${resolvedPush.sent}, failed=${resolvedPush.failed}, markets=${resolvedPush.markets}`
+        );
+      } catch (resolvedPushError) {
+        logger.warn(`[computePredictions][${runId}] Failed sending resolved market pushes: ${resolvedPushError.message}`);
+      }
+    }
     
     // Fetch active markets
     let markets = await polymarketService.fetchMarkets({ closed: false });

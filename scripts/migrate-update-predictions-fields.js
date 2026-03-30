@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Migration: Update all pending and approved predictions with latest fields
- * - Ensures all predictions have correct marketSlug and polymarketUrl
- * - Populates missing fields from market data
- * - Runs on deployment to backfill data
+ * Migration: Backfill Polymarket links for all predictions and caches
+ * - Updates ALL prediction records (any status) with canonical event links
+ * - Updates PredictionCache prediction.polymarketUrl links
+ * - Populates/repairs marketSlug from fetched market data when available
  */
 
 const mongoose = require('mongoose');
@@ -11,7 +11,12 @@ const config = require('../src/config/env');
 const logger = require('../src/config/logger');
 const polymarketService = require('../src/services/polymarketService');
 
-const MIGRATION_KEY = '2026-03-30-update-predictions-fields-v1';
+const MIGRATION_KEY = '2026-03-30-polymarket-links-backfill-v2';
+
+const buildEventUrlFromSlug = (slug) => {
+  if (!slug) return null;
+  return `https://polymarket.com/event/${encodeURIComponent(slug)}`;
+};
 
 const migrate = async () => {
   try {
@@ -40,35 +45,39 @@ const migrate = async () => {
         key: MIGRATION_KEY,
         status: 'in_progress',
         startedAt: new Date(),
-        migrationName: 'Update Predictions Fields v1'
+        migrationName: 'Polymarket Links Backfill v2'
       },
       { upsert: true }
     );
     logger.info('Recording migration start...');
     
-    // Fetch all pending and approved predictions
-    const predictions = await PredictionRecord.find({
-      status: { $in: ['pending', 'approved'] }
-    }).lean();
+    // Fetch all predictions (all statuses)
+    const predictions = await PredictionRecord.find({}).lean();
+    const PredictionCache = require('../src/models/PredictionCache');
+    const cachedPredictions = await PredictionCache.find({}).lean();
     
-    logger.info(`Found ${predictions.length} predictions to update`);
+    logger.info(`Found ${predictions.length} prediction records and ${cachedPredictions.length} cached predictions to evaluate`);
     
-    if (predictions.length === 0) {
-      logger.info('No predictions to update');
+    if (predictions.length === 0 && cachedPredictions.length === 0) {
+      logger.info('No prediction links to update');
       await MigrationState.updateOne(
         { key: MIGRATION_KEY },
         {
           status: 'completed',
           completedAt: new Date(),
-          recordsUpdated: 0
+          recordsUpdated: 0,
+          cacheUpdated: 0
         }
       );
       await mongoose.disconnect();
       process.exit(0);
     }
     
-    // Group predictions by market ID for efficient batch fetching
-    const marketIds = [...new Set(predictions.map(p => p.marketId))];
+    // Group all encountered market IDs for efficient batch fetching
+    const marketIds = [...new Set([
+      ...predictions.map((p) => p.marketId),
+      ...cachedPredictions.map((c) => c.marketId)
+    ].filter(Boolean))];
     logger.info(`Fetching data for ${marketIds.length} unique markets`);
     
     const marketDataMap = {};
@@ -94,10 +103,27 @@ const migrate = async () => {
     
     logger.info(`✓ Fetched market data: ${marketsFetched} succeeded, ${marketsFailed} failed`);
     
-    // Update predictions
+    // Update prediction records
     let updated = 0;
     let skipped = 0;
+    let cacheUpdated = 0;
+    let cacheSkipped = 0;
     const errors = [];
+
+    const buildLink = ({ marketId, recordSlug, marketData }) => {
+      if (marketData) {
+        return polymarketService.getMarketUrl({
+          marketId,
+          slug: marketData.slug,
+          eventSlug: marketData.eventSlug || null
+        });
+      }
+
+      const fallbackEventUrl = buildEventUrlFromSlug(recordSlug);
+      if (fallbackEventUrl) return fallbackEventUrl;
+
+      return polymarketService.getMarketUrl({ marketId, slug: null, eventSlug: null });
+    };
     
     for (const prediction of predictions) {
       try {
@@ -109,23 +135,20 @@ const migrate = async () => {
           continue;
         }
         
-        // Build update object with all necessary fields
+        const bestSlug = (marketData && (marketData.eventSlug || marketData.slug)) || prediction.marketSlug || null;
+
         const updates = {
-          marketSlug: marketData.slug,
-          polymarketUrl: polymarketService.getMarketUrl({
+          marketSlug: bestSlug,
+          polymarketUrl: buildLink({
             marketId: prediction.marketId,
-            slug: marketData.slug
+            recordSlug: prediction.marketSlug,
+            marketData
           }),
-          marketTitle: marketData.title || prediction.marketTitle,
-          // Ensure other critical fields are present
-          ...(prediction.updatedAt ? {} : { updatedAt: new Date() })
+          marketTitle: (marketData && marketData.title) || prediction.marketTitle
         };
         
         // Only update if something changed
-        if (
-          prediction.marketSlug !== updates.marketSlug ||
-          prediction.polymarketUrl !== updates.polymarketUrl
-        ) {
+        if (prediction.marketSlug !== updates.marketSlug || prediction.polymarketUrl !== updates.polymarketUrl) {
           await PredictionRecord.updateOne(
             { _id: prediction._id },
             { $set: updates }
@@ -142,8 +165,40 @@ const migrate = async () => {
         });
       }
     }
+
+    // Update cached predictions links
+    for (const cacheEntry of cachedPredictions) {
+      try {
+        const predictionPayload = cacheEntry.prediction || {};
+        const marketData = marketDataMap[cacheEntry.marketId] || null;
+        const cacheSlug = null;
+
+        const nextUrl = buildLink({
+          marketId: cacheEntry.marketId,
+          recordSlug: cacheSlug,
+          marketData
+        });
+
+        if (predictionPayload.polymarketUrl !== nextUrl) {
+          await PredictionCache.updateOne(
+            { _id: cacheEntry._id },
+            { $set: { 'prediction.polymarketUrl': nextUrl } }
+          );
+          cacheUpdated++;
+        } else {
+          cacheSkipped++;
+        }
+      } catch (error) {
+        logger.error(`Failed to update cached prediction ${cacheEntry._id}: ${error.message}`);
+        errors.push({
+          predictionId: cacheEntry._id.toString(),
+          error: error.message
+        });
+      }
+    }
     
     logger.info(`✓ Updated ${updated} predictions, skipped ${skipped} (no changes)`);
+    logger.info(`✓ Updated ${cacheUpdated} cached predictions, skipped ${cacheSkipped} (no changes)`);
     
     if (errors.length > 0) {
       logger.warn(`⚠ ${errors.length} errors encountered:`);
@@ -159,10 +214,13 @@ const migrate = async () => {
         status: 'completed',
         completedAt: new Date(),
         recordsUpdated: updated,
+        cacheUpdated,
         recordsSkipped: skipped,
+        cacheSkipped,
         recordsFailed: errors.length,
         details: {
           totalPredictions: predictions.length,
+          totalCachedPredictions: cachedPredictions.length,
           uniqueMarkets: marketIds.length,
           marketsFetched,
           marketsFailed,
@@ -174,8 +232,11 @@ const migrate = async () => {
     logger.info('═══════════════════════════════════════════════════════════');
     logger.info('✓ Migration completed successfully');
     logger.info(`  • Total predictions: ${predictions.length}`);
+    logger.info(`  • Total cached predictions: ${cachedPredictions.length}`);
     logger.info(`  • Updated: ${updated}`);
+    logger.info(`  • Cache updated: ${cacheUpdated}`);
     logger.info(`  • Skipped: ${skipped}`);
+    logger.info(`  • Cache skipped: ${cacheSkipped}`);
     logger.info(`  • Failed: ${errors.length}`);
     logger.info('═══════════════════════════════════════════════════════════');
     

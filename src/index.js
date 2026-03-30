@@ -238,9 +238,10 @@ const runStartupMigrations = async () => {
   try {
     const MigrationState = require('./models/MigrationState');
     const PredictionRecord = require('./models/PredictionRecord');
+    const PredictionCache = require('./models/PredictionCache');
     const polymarketService = require('./services/polymarketService');
     
-    const MIGRATION_KEY = '2026-03-30-update-predictions-fields-v1';
+    const MIGRATION_KEY = '2026-03-30-polymarket-links-backfill-v2';
     
     // Check if already migrated
     const existing = await MigrationState.findOne({ key: MIGRATION_KEY });
@@ -256,29 +257,33 @@ const runStartupMigrations = async () => {
         key: MIGRATION_KEY,
         status: 'in_progress',
         startedAt: new Date(),
-        migrationName: 'Update Predictions Fields v1 (Startup)'
+        migrationName: 'Polymarket Links Backfill v2 (Startup)'
       },
       { upsert: true }
     );
     
-    // Fetch all pending and approved predictions
-    const predictions = await PredictionRecord.find({
-      status: { $in: ['pending', 'approved'] }
-    }).lean();
+    // Fetch all predictions and cached predictions
+    const predictions = await PredictionRecord.find({}).lean();
+    const cachedPredictions = await PredictionCache.find({}).lean();
     
-    if (predictions.length === 0) {
-      logger.info('No predictions to update in startup migration');
+    if (predictions.length === 0 && cachedPredictions.length === 0) {
+      logger.info('No prediction links to update in startup migration');
       await MigrationState.updateOne(
         { key: MIGRATION_KEY },
-        { status: 'completed', completedAt: new Date(), recordsUpdated: 0 }
+        { status: 'completed', completedAt: new Date(), recordsUpdated: 0, cacheUpdated: 0 }
       );
       return;
     }
     
-    logger.info(`Running startup migration for ${predictions.length} predictions`);
+    logger.info(
+      `Running startup link migration for ${predictions.length} prediction records and ${cachedPredictions.length} cached predictions`
+    );
     
     // Group predictions by market ID
-    const marketIds = [...new Set(predictions.map(p => p.marketId))];
+    const marketIds = [...new Set([
+      ...predictions.map((p) => p.marketId),
+      ...cachedPredictions.map((c) => c.marketId)
+    ].filter(Boolean))];
     const marketDataMap = {};
     
     // Fetch market data with error handling
@@ -292,21 +297,42 @@ const runStartupMigrations = async () => {
       }
     }
     
-    // Update predictions
+    const buildEventUrlFromSlug = (slug) => {
+      if (!slug) return null;
+      return `https://polymarket.com/event/${encodeURIComponent(slug)}`;
+    };
+
+    const buildLink = ({ marketId, recordSlug, marketData }) => {
+      if (marketData) {
+        return polymarketService.getMarketUrl({
+          marketId,
+          slug: marketData.slug,
+          eventSlug: marketData.eventSlug || null
+        });
+      }
+
+      const fallbackEventUrl = buildEventUrlFromSlug(recordSlug);
+      if (fallbackEventUrl) return fallbackEventUrl;
+
+      return polymarketService.getMarketUrl({ marketId, slug: null, eventSlug: null });
+    };
+
+    // Update prediction records
     let updated = 0;
+    let cacheUpdated = 0;
     for (const prediction of predictions) {
       try {
-        const marketData = marketDataMap[prediction.marketId];
-        if (!marketData) continue;
+        const marketData = marketDataMap[prediction.marketId] || null;
+        const bestSlug = (marketData && (marketData.eventSlug || marketData.slug)) || prediction.marketSlug || null;
         
         const updates = {
-          marketSlug: marketData.slug,
-          polymarketUrl: polymarketService.getMarketUrl({
+          marketSlug: bestSlug,
+          polymarketUrl: buildLink({
             marketId: prediction.marketId,
-            slug: marketData.slug,
-            eventSlug: marketData.eventSlug || null
+            recordSlug: prediction.marketSlug,
+            marketData
           }),
-          marketTitle: marketData.title || prediction.marketTitle
+          marketTitle: (marketData && marketData.title) || prediction.marketTitle
         };
         
         if (prediction.marketSlug !== updates.marketSlug || prediction.polymarketUrl !== updates.polymarketUrl) {
@@ -317,6 +343,29 @@ const runStartupMigrations = async () => {
         logger.warn(`Failed to update prediction in startup migration: ${error.message}`);
       }
     }
+
+    // Update cached prediction links
+    for (const cacheEntry of cachedPredictions) {
+      try {
+        const marketData = marketDataMap[cacheEntry.marketId] || null;
+        const nextUrl = buildLink({
+          marketId: cacheEntry.marketId,
+          recordSlug: null,
+          marketData
+        });
+
+        const currentUrl = cacheEntry?.prediction?.polymarketUrl || null;
+        if (currentUrl !== nextUrl) {
+          await PredictionCache.updateOne(
+            { _id: cacheEntry._id },
+            { $set: { 'prediction.polymarketUrl': nextUrl } }
+          );
+          cacheUpdated++;
+        }
+      } catch (error) {
+        logger.warn(`Failed to update cached prediction in startup migration: ${error.message}`);
+      }
+    }
     
     // Record completion
     await MigrationState.updateOne(
@@ -325,13 +374,18 @@ const runStartupMigrations = async () => {
         status: 'completed',
         completedAt: new Date(),
         recordsUpdated: updated,
-        details: { totalPredictions: predictions.length }
+        cacheUpdated,
+        details: {
+          totalPredictions: predictions.length,
+          totalCachedPredictions: cachedPredictions.length
+        }
       }
     );
     
-    if (updated > 0) {
-      logger.info(`✓ Startup migration completed: updated ${updated}/${predictions.length} predictions`);
-    }
+    logger.info(
+      `✓ Startup migration completed: updated ${updated}/${predictions.length} predictions, ` +
+      `updated ${cacheUpdated}/${cachedPredictions.length} cached predictions`
+    );
   } catch (error) {
     logger.warn(`Startup migration error (non-blocking): ${error.message}`);
     // Don't throw - let server start regardless
@@ -346,6 +400,7 @@ const setupCronJobs = () => {
 
   let refreshInProgress = false;
   let predictionInProgress = false;
+  let weeklyDigestInProgress = false;
   
   // Refresh markets every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
@@ -398,8 +453,33 @@ const setupCronJobs = () => {
       predictionInProgress = false;
     }
   });
+
+  // Weekly push digest every Monday at 09:00 UTC
+  cron.schedule('0 9 * * 1', async () => {
+    if (weeklyDigestInProgress) {
+      logger.info('Skipping weekly digest: previous run still in progress');
+      return;
+    }
+
+    weeklyDigestInProgress = true;
+    const digestRunId = `weekly-digest-${Date.now()}`;
+
+    try {
+      logger.info(`[cron][weekly-digest][${digestRunId}] START`);
+      const notificationService = require('./services/notificationService');
+      const digestResult = await notificationService.sendWeeklyPushDigest({ windowDays: 7 });
+      logger.info(
+        `[cron][weekly-digest][${digestRunId}] END sent=${digestResult.sent}, failed=${digestResult.failed}, checked=${digestResult.checked}`
+      );
+      global.lastCronRun = new Date().toISOString();
+    } catch (error) {
+      logger.error(`[cron][weekly-digest][${digestRunId}] FAILED: ${error.message}`);
+    } finally {
+      weeklyDigestInProgress = false;
+    }
+  });
   
-  logger.info('✓ Cron jobs scheduled: refresh (every 5 min), predictions (every 10 min)');
+  logger.info('✓ Cron jobs scheduled: refresh (every 5 min), predictions (every 10 min), weekly digest (Mon 09:00 UTC)');
 };
 
 /**

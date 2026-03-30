@@ -151,6 +151,69 @@ const sendMarketAlertPush = async (subscription, message, data = {}) => {
 };
 
 /**
+ * Sends market resolution push notification
+ * @param {Object} subscription - Push subscription object
+ * @param {Object} resolution - Resolution payload
+ * @returns {Promise<Object>}
+ */
+const sendMarketResolvedPush = async (subscription, resolution) => {
+  const payload = {
+    title: '✅ Market Resolved',
+    body: `${resolution.marketTitle}: Final result ${resolution.finalResult || 'resolved'}`,
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: `resolved-${resolution.marketId}`,
+    data: {
+      marketId: resolution.marketId,
+      finalResult: resolution.finalResult || null,
+      url: resolution.url || 'https://polymarket.com',
+      timestamp: Date.now()
+    },
+    actions: [
+      {
+        action: 'view',
+        title: 'View Market'
+      },
+      {
+        action: 'dismiss',
+        title: 'Dismiss'
+      }
+    ],
+    timestamp: Date.now()
+  };
+
+  return sendPushNotification(subscription, payload);
+};
+
+/**
+ * Sends weekly digest push notification
+ * @param {Object} subscription - Push subscription object
+ * @param {Object} digest - Digest metrics payload
+ * @returns {Promise<Object>}
+ */
+const sendWeeklyDigestPush = async (subscription, digest) => {
+  const payload = {
+    title: '📈 Weekly Polyscope Digest',
+    body: `${digest.windowDays}d: ${digest.winRate}% win rate (${digest.correct}/${digest.resolved} correct)`,
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: `weekly-digest-${digest.windowDays}`,
+    data: {
+      type: 'weekly-digest',
+      windowDays: digest.windowDays,
+      resolved: digest.resolved,
+      correct: digest.correct,
+      winRate: digest.winRate,
+      url: digest.url || 'https://polymarket.com',
+      timestamp: Date.now()
+    },
+    timestamp: Date.now()
+  };
+
+  return sendPushNotification(subscription, payload);
+};
+
+/**
  * Validates push subscription object
  * @param {Object} subscription - Subscription to validate
  * @returns {boolean}
@@ -188,6 +251,8 @@ module.exports = {
   sendPredictionPush,
   sendTestPush,
   sendMarketAlertPush,
+  sendMarketResolvedPush,
+  sendWeeklyDigestPush,
   validateSubscription,
   isConfigured,
   getVapidPublicKey,

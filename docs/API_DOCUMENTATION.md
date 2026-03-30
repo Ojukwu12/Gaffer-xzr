@@ -442,10 +442,18 @@ Subscribe to push notifications.
   ],
   "preferences": {
     "minConfidence": 70,
-    "maxNotificationsPerDay": 20
+    "maxNotificationsPerDay": 20,
+    "notifyOnResolution": true,
+    "notifyWeeklyDigest": true
   }
 }
 ```
+
+Push notification triggers:
+- On subscribe: immediate welcome push.
+- On approved prediction publication: prediction alert push.
+- On market resolution/expiry cleanup: resolved-market push (if `notifyOnResolution` is not `false`).
+- Weekly digest: scheduled every Monday at 09:00 UTC (if `notifyWeeklyDigest` is not `false`).
 
 #### POST /api/notifications/email/unsubscribe
 Unsubscribe from email notifications.
@@ -500,13 +508,13 @@ Update notification preferences for email or push subscriptions.
 **Body:**
 ```json
 {
-  "type": "email",
-  "identifier": "user@example.com",
+  "type": "push",
+  "identifier": "https://push-service/...",
   "preferences": {
-    "frequency": "monthly",
     "minConfidence": 75,
     "maxNotificationsPerDay": 5,
-    "includeFeatures": true
+    "notifyOnResolution": true,
+    "notifyWeeklyDigest": true
   }
 }
 ```
