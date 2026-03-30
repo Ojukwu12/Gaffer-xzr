@@ -10,6 +10,8 @@ const config = {
   // Server Configuration
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
+  appUrl: process.env.APP_URL || 'http://localhost:5000',
+  frontendUrl: process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000',
   
   // CORS Configuration
   allowedOrigins: process.env.ALLOWED_ORIGINS || '',

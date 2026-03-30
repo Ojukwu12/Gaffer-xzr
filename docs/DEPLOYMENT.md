@@ -145,10 +145,12 @@ node -e "require('./src/config/db').connectDB().then(() => console.log('DB OK'))
 
 # Test LLM service
 curl -X POST http://localhost:3000/api/admin/test/llm \
+  -H "x-admin-key: your_admin_secret_key" \
   -H "X-API-Key: your_admin_api_key"
 
 # Test email service
 curl -X POST http://localhost:3000/api/admin/test/email \
+  -H "x-admin-key: your_admin_secret_key" \
   -H "X-API-Key: your_admin_api_key" \
   -H "Content-Type: application/json" \
   -d '{"to":"test@example.com"}'

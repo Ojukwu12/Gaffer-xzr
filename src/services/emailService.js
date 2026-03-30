@@ -211,7 +211,8 @@ View on Polymarket: ${prediction.polymarketUrl || 'https://polymarket.com'}
  * @returns {Promise<Object>}
  */
 const sendSubscriptionConfirmationEmail = async (to, verificationToken) => {
-  const verificationUrl = `${process.env.APP_URL || 'http://localhost:5000'}/api/notifications/email/verify?token=${verificationToken}`;
+  const config = require('../config/env');
+  const verificationUrl = `${config.frontendUrl}/verify-email?token=${verificationToken}`;
   
   const html = `
 <!DOCTYPE html>

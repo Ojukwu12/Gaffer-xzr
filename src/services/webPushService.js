@@ -114,11 +114,11 @@ const sendPredictionPush = async (subscription, prediction, market) => {
  */
 const sendTestPush = async (subscription) => {
   const payload = {
-    title: '🎯 Polyscope Test',
-    body: 'Your push notifications are working correctly!',
+    title: '👋 Welcome to Polyscope',
+    body: 'Your push notifications are set up and ready to receive predictions!',
     icon: '/icon.png',
     badge: '/badge.png',
-    tag: 'test',
+    tag: 'welcome',
     timestamp: Date.now()
   };
   

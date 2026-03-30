@@ -9,9 +9,24 @@ Production: https://polyscope.onrender.com
 ```
 
 ## Authentication
-Most endpoints don't require authentication. Admin endpoints require API key authentication:
+Most endpoints don't require authentication.
+
+Admin access uses two headers on `/api/admin/*` routes:
 ```
 X-API-Key: your-admin-api-key
+x-admin-key: your_admin_secret_key
+```
+
+Notes:
+- `X-API-Key` must belong to an active user with `role: admin`.
+- `x-admin-key` must match `ADMIN_SECRET_KEY` from backend `.env`.
+- `/api/metrics` uses `X-API-Key` only (not `x-admin-key`).
+
+Admin debug example:
+```bash
+curl http://localhost:5000/api/admin/debug \
+  -H "x-admin-key: your_admin_secret_key" \
+  -H "X-API-Key: your_admin_api_key"
 ```
 
 ## Response Format

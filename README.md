@@ -94,6 +94,27 @@ All market endpoints now return:
 Running startup migrations...
 Running startup migration for 127 predictions
 ✓ Startup migration completed: updated 89/127 predictions
+
+### Notification System Improvements
+- Push notifications now send proper welcome message: "👋 Welcome to Polyscope"
+- Email verification links redirect to frontend (configurable via `FRONTEND_URL`)
+- Simplified frontend integration with complete code examples
+
+**Configuration:**
+```env
+# Backend self-reference (internal use)
+APP_URL=http://localhost:5000
+
+# Frontend URL (for email verification redirects)
+FRONTEND_URL=http://localhost:3000
+```
+
+**Frontend Integration:**
+See [docs/FRONTEND_INTEGRATION.md](docs/FRONTEND_INTEGRATION.md) for:
+- Email subscription and verification handling
+- Push notification setup and service worker
+- Complete code examples for React/vanilla JS
+- Troubleshooting guide
 ```
 
 ### Migration Instructions
@@ -223,6 +244,17 @@ docs/API_DOCUMENTATION.md  # API reference
 - `GET /api/admin/health/external-sources` - External API/source health checks
 - `GET /api/admin/metrics/external-data` - External data monitoring metrics
 
+Admin auth requirements for `/api/admin/*`:
+- `x-admin-key: <ADMIN_SECRET_KEY from .env>`
+- `X-API-Key: <admin user's API key>`
+
+Example:
+```bash
+curl http://localhost:5000/api/admin/debug \
+  -H "x-admin-key: your_admin_secret_key" \
+  -H "X-API-Key: your_admin_api_key"
+```
+
 ### Health
 - `GET /health` - System health check
 
@@ -250,6 +282,11 @@ BREVO_API_KEY=your_brevo_api_key
 EMAIL_FROM_ADDRESS=obiefunaokechukwu98@gmail.com
 EMAIL_FROM_NAME=Polyscope Notifications
 APP_URL=http://localhost:5000
+FRONTEND_URL=http://localhost:3000
+
+# Admin auth
+ADMIN_SECRET_KEY=your_admin_secret_key
+ADMIN_API_KEY=your_admin_api_key
 
 # Web Push (Optional)
 WEB_PUSH_VAPID_PUBLIC=your_public_key

@@ -81,7 +81,16 @@ const requireAdminSecretKey = async (req, res, next) => {
 
   const providedSecret = req.header('x-admin-key');
 
-  if (!providedSecret || providedSecret !== config.adminSecretKey) {
+  if (!providedSecret) {
+    logger.warn('Missing admin secret key header', {
+      ip: req.ip,
+      path: req.path
+    });
+
+    throw new CustomError('Admin key is required in x-admin-key header', 403, 'MISSING_ADMIN_KEY');
+  }
+
+  if (providedSecret !== config.adminSecretKey) {
     logger.warn('Invalid admin secret key attempt', {
       ip: req.ip,
       path: req.path

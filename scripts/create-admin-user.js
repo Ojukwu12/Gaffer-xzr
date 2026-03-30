@@ -59,10 +59,11 @@ const createAdminUser = async () => {
     console.log('═══════════════════════════════════════════════════════');
     console.log(`  Email:   ${admin.email}`);
     console.log(`  API Key: ${admin.apiKey}`);
+    console.log(`  Admin Key Header (x-admin-key): ${process.env.ADMIN_SECRET_KEY || 'SET ADMIN_SECRET_KEY IN .env'}`);
     console.log('═══════════════════════════════════════════════════════');
     console.log('');
     console.log('Usage example:');
-    console.log(`  curl -H "X-API-Key: ${admin.apiKey}" http://localhost:3000/api/admin/debug`);
+    console.log(`  curl -H "x-admin-key: ${process.env.ADMIN_SECRET_KEY || 'your_admin_secret_key'}" -H "X-API-Key: ${admin.apiKey}" http://localhost:5000/api/admin/debug`);
     console.log('');
     
     await mongoose.connection.close();
