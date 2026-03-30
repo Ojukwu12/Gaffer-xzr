@@ -74,13 +74,15 @@ Check server health status
 ### Markets
 
 #### GET /api/markets
-Get list of active markets
+Get list of active markets with prediction status indicators
 
 **Query Parameters:**
 - `limit` (optional, default: 50): Number of markets to return
 - `offset` (optional, default: 0): Pagination offset
 - `category` (optional): Filter by category
 - `search` (optional): Search markets by title
+- `status` (optional): Filter by status (`active` or `closed`)
+- `timeframe` (optional): Filter by available timeframe (`daily`, `weekly`, `monthly`)
 
 **Response:**
 ```json
@@ -97,18 +99,28 @@ Get list of active markets
         "liquidity": 150000,
         "volume24h": 45000,
         "endDate": "2025-12-31T23:59:59.000Z",
-        "categories": ["Crypto"]
+        "categories": ["Crypto"],
+        "hasPrediction": true,
+        "availableTimeframes": ["daily", "weekly"],
+        "optimalTimeframe": "daily"
       }
     ],
-    "total": 100,
-    "page": 1,
-    "pages": 2
+    "pagination": {
+      "limit": 50,
+      "offset": 0,
+      "total": 100
+    }
   }
 }
 ```
 
+**New Fields:**
+- `hasPrediction` (boolean): Whether this market has approved or pending predictions
+- `availableTimeframes` (array): Timeframes for which analysis is available
+- `optimalTimeframe` (string): Recommended timeframe for this market based on its age
+
 #### GET /api/markets/:id
-Get details for a specific market
+Get details for a specific market with prediction status
 
 **Parameters:**
 - `id`: Market ID (condition_id)
@@ -131,10 +143,31 @@ Get details for a specific market
     "createdAt": "2025-01-01T00:00:00.000Z",
     "categories": ["Crypto"],
     "active": true,
-    "resolved": false
+    "resolved": false,
+    "hasPrediction": true,
+    "availableTimeframes": ["daily", "weekly", "monthly"],
+    "optimalTimeframe": "daily",
+    "cachedPredictions": {
+      "Yes": {
+        "daily": {
+          "confidenceScore": 78,
+          "marketProbabilityAtTime": 65,
+          "aiProbability": 72,
+          "statement": "The market is underpricing this outcome by ~7%",
+          "reason": "Strong buying pressure from institutional traders",
+          "status": "approved",
+          "approvedAt": "2026-03-29T10:30:00.000Z"
+        }
+      }
+    }
   }
 }
 ```
+
+**New Fields:**
+- `hasPrediction` (boolean): Whether this market has approved or pending predictions
+- `cachedPredictions` (object): Latest approved predictions organized by option, then timeframe
+  - Each prediction includes confidence, market probability, AI probability, reasoning, and approval date
 
 ---
 
@@ -194,9 +227,13 @@ Get a single approved prediction record
 }
 ```
 
-Security note:
-- Public generation-style routes are blocked by design.
-- Prediction engine internals, external-source logic, and model features are not exposed in public responses.
+Security & Public Access:
+- **Public Market Routes (GET):** All market endpoints (`/api/markets`, `/api/markets/:id`, `/api/markets/search`, `/api/markets/trending`, `/api/markets/category/:category`) are fully public
+- **Private Prediction Generation:** Prediction creation is backend-only and not exposed
+- **Public Prediction Reading:** Approved predictions are public read-only
+- **Frontend Use Case:** Use `hasPrediction` field on market tiles to display prediction indicators (e.g., "🎯 Predicted" badge)
+- **Prediction details:** Retrieved via `cachedPredictions` object in market detail endpoint
+- **Note:** Prediction engine internals, external-source logic, and model features are not exposed in public responses
 
 #### GET /api/predictions/performance
 Get prediction performance for frontend dashboards (max 30 days).

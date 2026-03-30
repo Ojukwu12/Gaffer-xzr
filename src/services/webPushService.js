@@ -70,6 +70,12 @@ const sendPushNotification = async (subscription, payload) => {
  * @returns {Promise<Object>}
  */
 const sendPredictionPush = async (subscription, prediction, market) => {
+  const polymarketService = require('./polymarketService');
+  const marketUrl = polymarketService.getMarketUrl({
+    marketId: market.marketId,
+    slug: market.slug || null
+  });
+  
   const payload = {
     title: '🎯 Polyscope Alert',
     body: `${market.title}: ${prediction.confidence}% confidence for ${prediction.option}`,
@@ -82,7 +88,7 @@ const sendPredictionPush = async (subscription, prediction, market) => {
       confidence: prediction.confidence,
       reason: prediction.reason,
       timeframe: prediction.timeframe,
-      url: `https://polymarket.com/market/${market.marketId}`
+      url: marketUrl
     },
     actions: [
       {

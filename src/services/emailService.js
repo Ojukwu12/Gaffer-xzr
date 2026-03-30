@@ -164,7 +164,7 @@ const sendPredictionEmail = async (to, prediction, market) => {
       </div>
       
       <center>
-        <a href="https://polymarket.com" class="button">View on Polymarket</a>
+        <a href="${prediction.polymarketUrl || 'https://polymarket.com'}" class="button">View on Polymarket</a>
       </center>
       
       <div class="footer">
@@ -193,7 +193,7 @@ Key Metrics:
 - Whale Factor: ${((prediction.features.whaleFactor || 0) * 100).toFixed(0)}%
 - Trend Score: ${((prediction.features.trendScore || 0) * 100).toFixed(0)}%
 
-View on Polymarket: https://polymarket.com
+View on Polymarket: ${prediction.polymarketUrl || 'https://polymarket.com'}
   `;
   
   return sendEmail({
@@ -393,7 +393,7 @@ const sendHighConfidenceAlert = async (to, prediction, market) => {
       </ul>
       
       <center>
-        <a href="https://polymarket.com" class="button">VIEW ON POLYMARKET →</a>
+        <a href="${prediction.polymarketUrl || 'https://polymarket.com'}" class="button">VIEW ON POLYMARKET →</a>
       </center>
       
       <div style="margin-top: 30px; padding: 20px; background: #fee2e2; border-radius: 5px;">

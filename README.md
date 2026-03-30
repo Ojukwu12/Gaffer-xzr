@@ -65,6 +65,47 @@ npm run lint
 
 Server will start on `http://localhost:5000` by default.
 
+## 📝 What's New in v2.0
+
+### Prediction Status Indicators
+- Markets now include a `hasPrediction` boolean field
+- Frontend can display prediction indicators on market tiles (e.g., "🎯 Predicted" badge)
+- Use this field to show users which markets have AI analysis available
+
+### Updated Market Responses
+All market endpoints now return:
+- **`hasPrediction`** - Whether the market has approved or pending predictions
+- **`cachedPredictions`** - Latest predictions organized by option and timeframe
+- **`availableTimeframes`** - Prediction timeframes available for the market
+
+### Direct Market URLs  
+- Fixed Polymarket link generation to use stable `/event/{slug}` format
+- Predictions now link correctly to markets without 404 errors
+- Automatic slug generation from market titles when needed
+
+### Automatic Database Migration
+- Migration runs automatically on server startup (non-blocking)
+- Updates all predictions with correct fields
+- No manual steps required - just start the server
+- Idempotent - safe to re-run or restart during migration
+
+**Startup log output:**
+```
+Running startup migrations...
+Running startup migration for 127 predictions
+✓ Startup migration completed: updated 89/127 predictions
+```
+
+### Migration Instructions
+**No action needed** - migrations run automatically at startup.
+
+**For Frontend Developers:**
+See [docs/MIGRATION_V2_PREDICTION_STATUS.md](docs/MIGRATION_V2_PREDICTION_STATUS.md) for:
+- Updated API response examples
+- Frontend component code examples
+- Backward compatibility notes
+- Response format specifications
+
 ## 🧪 Testing
 
 The project includes a comprehensive test suite:

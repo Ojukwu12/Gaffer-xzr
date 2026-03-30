@@ -93,7 +93,51 @@ node scripts/create-admin-user.js
 # Save the generated API key securely
 ```
 
-## 6. Test Configuration
+## 6. Database Migrations
+
+### Initial Setup & Schema
+
+```bash
+# Create database indexes
+mongosh < scripts/init-indexes.js
+```
+
+### Data Migrations (Automatic at Startup)
+
+Migrations run automatically when the server starts:
+
+```bash
+# When server starts, it will:
+npm start
+
+# Migrations run in the background (non-blocking):
+# ✓ Update predictions with new fields (marketSlug, polymarketUrl)
+# ✓ Populate marketSlug from slugified market titles
+# ✓ Generate correct polymarketUrl in /event/{slug} format
+# ✓ Record completion in MigrationState collection
+```
+
+**Expected log output during startup:**
+```
+Running startup migrations...
+Running startup migration for 127 predictions
+✓ Startup migration completed: updated 89/127 predictions
+```
+
+**Manual Migration Run (optional):**
+```bash
+# Can also be run manually if needed (e.g., after manual updates)
+node scripts/migrate-update-predictions-fields.js
+```
+
+**Check Migration History:**
+```bash
+mongosh
+> use polyscope
+> db.migration_states.find().pretty()
+```
+
+## 7. Test Configuration
 
 ```bash
 # Test database connection
@@ -110,7 +154,7 @@ curl -X POST http://localhost:3000/api/admin/test/email \
   -d '{"to":"test@example.com"}'
 ```
 
-## 7. Start Application
+## 8. Start Application
 
 ### Development Mode
 ```bash
@@ -138,7 +182,7 @@ pm2 save
 pm2 monit
 ```
 
-## 8. Docker Deployment (Alternative)
+## 9. Docker Deployment (Alternative)
 
 ```bash
 # Build and start with Docker Compose
@@ -151,7 +195,7 @@ docker-compose logs -f api
 docker-compose down
 ```
 
-## 9. Setup Reverse Proxy (Nginx)
+## 10. Setup Reverse Proxy (Nginx)
 
 ```nginx
 server {

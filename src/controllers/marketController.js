@@ -14,6 +14,47 @@ const predictionModerationService = require('../services/predictionModerationSer
 const logger = require('../config/logger');
 
 /**
+ * Checks if a market has any approved predictions
+ * @param {string} marketId - Market ID
+ * @returns {Promise<boolean>} True if market has approved predictions
+ */
+const checkMarketHasPredictions = async (marketId) => {
+  try {
+    const PredictionRecord = require('../models/PredictionRecord');
+    const count = await PredictionRecord.countDocuments({
+      marketId,
+      status: { $in: ['approved', 'pending'] }
+    });
+    return count > 0;
+  } catch (error) {
+    logger.warn(`Failed to check predictions for market ${marketId}:`, error);
+    return false;
+  }
+};
+
+/**
+ * Enriches a market object with prediction status
+ * @param {Object} market - Market object
+ * @returns {Promise<Object>} Market with prediction status
+ */
+const enrichMarketWithPredictionStatus = async (market) => {
+  const hasPrediction = await checkMarketHasPredictions(market.marketId);
+  return {
+    ...market,
+    hasPrediction
+  };
+};
+
+/**
+ * Enriches multiple markets with prediction status
+ * @param {Array} markets - Array of market objects
+ * @returns {Promise<Array>} Markets with prediction status
+ */
+const enrichMarketsWithPredictionStatus = async (markets) => {
+  return Promise.all(markets.map(m => enrichMarketWithPredictionStatus(m)));
+};
+
+/**
  * Filters out expired markets
  * @param {Array} markets - Array of market objects
  * @returns {Array} Filtered markets with non-expired only
@@ -70,12 +111,15 @@ const getMarkets = asyncHandler(async (req, res) => {
   const total = markets.length;
   markets = markets.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
   
-  // Enrich with timeframe information
+  // Enrich with timeframe information and prediction status
   markets = markets.map(m => ({
     ...m,
     availableTimeframes: timeframeService.getAvailableTimeframes(m),
     optimalTimeframe: timeframeService.getOptimalTimeframe(m)
   }));
+  
+  // Add prediction status to each market
+  markets = await enrichMarketsWithPredictionStatus(markets);
   
   // Cache the result
   cacheService.cacheMarketList(cacheKey, markets, 300);
@@ -113,6 +157,9 @@ const getMarketById = asyncHandler(async (req, res) => {
   
   // Enrich with timeframe data
   const enrichedMarket = timeframeService.enrichMarketWithTimeframes(marketData);
+  
+  // Add prediction status
+  enrichedMarket.hasPrediction = await checkMarketHasPredictions(id);
   
   // Include only approved predictions for public responses.
   const predictions = {};
@@ -167,6 +214,9 @@ const searchMarkets = asyncHandler(async (req, res) => {
     .filter(m => filterExpiredMarkets([m]).length > 0)
     .slice(0, parseInt(limit));
   
+  // Add prediction status
+  markets = await enrichMarketsWithPredictionStatus(markets);
+  
   return success(res, { markets, query: q });
 });
 
@@ -194,6 +244,9 @@ const getMarketsByCategory = asyncHandler(async (req, res) => {
     .map(m => polymarketService.parseMarket(m))
     .filter(m => filterExpiredMarkets([m]).length > 0)
     .slice(0, parseInt(limit));
+  
+  // Add prediction status
+  markets = await enrichMarketsWithPredictionStatus(markets);
   
   // Cache result
   cacheService.cacheMarketList(cacheKey, markets, 300);
@@ -225,6 +278,9 @@ const getTrendingMarkets = asyncHandler(async (req, res) => {
       .filter(m => filterExpiredMarkets([m]).length > 0)
       .slice(0, parseInt(limit));
     
+    // Add prediction status
+    markets = await enrichMarketsWithPredictionStatus(markets);
+    
     // Cache result
     cacheService.cacheMarketList('trending', markets, 180); // 3 minutes
     
@@ -250,6 +306,9 @@ const getTrendingMarkets = asyncHandler(async (req, res) => {
     });
     
     markets = markets.slice(0, parseInt(limit));
+    
+    // Add prediction status
+    markets = await enrichMarketsWithPredictionStatus(markets);
     
     cacheService.cacheMarketList('trending', markets, 180);
     return success(res, { markets, fallback: true });

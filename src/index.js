@@ -154,6 +154,113 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 /**
+ * Run all startup migrations
+ * Non-blocking - warns on failure but doesn't halt startup
+ */
+const runStartupMigrations = async () => {
+  try {
+    const MigrationState = require('./models/MigrationState');
+    const PredictionRecord = require('./models/PredictionRecord');
+    const polymarketService = require('./services/polymarketService');
+    
+    const MIGRATION_KEY = '2026-03-30-update-predictions-fields-v1';
+    
+    // Check if already migrated
+    const existing = await MigrationState.findOne({ key: MIGRATION_KEY });
+    if (existing && existing.status === 'completed') {
+      logger.info(`✓ Startup migration already completed on ${existing.completedAt}`);
+      return;
+    }
+    
+    // Record migration start
+    await MigrationState.updateOne(
+      { key: MIGRATION_KEY },
+      {
+        key: MIGRATION_KEY,
+        status: 'in_progress',
+        startedAt: new Date(),
+        migrationName: 'Update Predictions Fields v1 (Startup)'
+      },
+      { upsert: true }
+    );
+    
+    // Fetch all pending and approved predictions
+    const predictions = await PredictionRecord.find({
+      status: { $in: ['pending', 'approved'] }
+    }).lean();
+    
+    if (predictions.length === 0) {
+      logger.info('No predictions to update in startup migration');
+      await MigrationState.updateOne(
+        { key: MIGRATION_KEY },
+        { status: 'completed', completedAt: new Date(), recordsUpdated: 0 }
+      );
+      return;
+    }
+    
+    logger.info(`Running startup migration for ${predictions.length} predictions`);
+    
+    // Group predictions by market ID
+    const marketIds = [...new Set(predictions.map(p => p.marketId))];
+    const marketDataMap = {};
+    
+    // Fetch market data with error handling
+    for (const marketId of marketIds) {
+      try {
+        const rawMarket = await polymarketService.fetchMarketById(marketId);
+        const parsedMarket = polymarketService.parseMarket(rawMarket);
+        marketDataMap[marketId] = parsedMarket;
+      } catch (error) {
+        logger.warn(`Failed to fetch market ${marketId} in startup migration: ${error.message}`);
+      }
+    }
+    
+    // Update predictions
+    let updated = 0;
+    for (const prediction of predictions) {
+      try {
+        const marketData = marketDataMap[prediction.marketId];
+        if (!marketData) continue;
+        
+        const updates = {
+          marketSlug: marketData.slug,
+          polymarketUrl: polymarketService.getMarketUrl({
+            marketId: prediction.marketId,
+            slug: marketData.slug
+          }),
+          marketTitle: marketData.title || prediction.marketTitle
+        };
+        
+        if (prediction.marketSlug !== updates.marketSlug || prediction.polymarketUrl !== updates.polymarketUrl) {
+          await PredictionRecord.updateOne({ _id: prediction._id }, { $set: updates });
+          updated++;
+        }
+      } catch (error) {
+        logger.warn(`Failed to update prediction in startup migration: ${error.message}`);
+      }
+    }
+    
+    // Record completion
+    await MigrationState.updateOne(
+      { key: MIGRATION_KEY },
+      {
+        status: 'completed',
+        completedAt: new Date(),
+        recordsUpdated: updated,
+        details: { totalPredictions: predictions.length }
+      }
+    );
+    
+    if (updated > 0) {
+      logger.info(`✓ Startup migration completed: updated ${updated}/${predictions.length} predictions`);
+    }
+  } catch (error) {
+    logger.warn(`Startup migration error (non-blocking): ${error.message}`);
+    // Don't throw - let server start regardless
+  }
+};
+
+/**
  * Setup automatic cron jobs
  */
 const setupCronJobs = () => {
@@ -254,6 +361,15 @@ const startServer = async () => {
     } catch (backfillError) {
       // Do not block boot for migration failures; keep service available.
       logger.warn(`Approved reason backfill did not complete: ${backfillError.message}`);
+    }
+
+    // Run startup migrations (non-blocking)
+    try {
+      logger.info('Running startup migrations...');
+      await runStartupMigrations();
+    } catch (migrationError) {
+      // Do not block boot for migration failures; keep service available.
+      logger.warn(`Startup migrations did not complete: ${migrationError.message}`);
     }
 
     // Optional hard gate to prevent going live before paper validation proves readiness.

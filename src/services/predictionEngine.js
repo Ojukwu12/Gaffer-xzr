@@ -970,13 +970,16 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   const cached = await cacheService.getPrediction(marketId, option, timeframe);
   if (cached) {
     logger.info('Returning cached prediction');
+    // Ensure polymarketUrl is present; regenerate if missing
+    let cachedMarketData = cacheService.getCachedMarket(marketId);
+    const slug = cachedMarketData?.slug || null;
     return {
       ...cached,
       fromCache: true,
       marketId,
       option,
       timeframe,
-      polymarketUrl: cached.polymarketUrl || polymarketService.getMarketUrl({ marketId, slug: null })
+      polymarketUrl: cached.polymarketUrl || polymarketService.getMarketUrl({ marketId, slug })
     };
   }
   

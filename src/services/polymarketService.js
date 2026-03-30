@@ -225,6 +225,22 @@ const searchMarkets = async (query) => {
 };
 
 /**
+ * Generates a URL-safe slug from a string
+ * @param {string} text - Text to slugify
+ * @returns {string} URL-safe slug
+ */
+const generateSlug = (text) => {
+  if (!text) return '';
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Remove special characters
+    .replace(/\s+/g, '-')     // Replace spaces with hyphens
+    .replace(/-+/g, '-')      // Replace multiple hyphens with single hyphen
+    .slice(0, 100);           // Limit length
+};
+
+/**
  * Parses market data into standardized format
  * @param {Object} rawMarket - Raw market data from API
  * @returns {Object} Standardized market object
@@ -235,9 +251,15 @@ const parseMarket = (rawMarket) => {
                 (rawMarket.twitterCardImage && rawMarket.twitterCardImage.trim()) || 
                 null;
 
+  const title = rawMarket.question || rawMarket.title;
+  
+  // Use Gamma slug if available, otherwise generate from title
+  // This ensures we always have a slug for Polymarket's /event/ URLs
+  const slug = rawMarket.slug || rawMarket.market_slug || generateSlug(title) || null;
+
   return {
     marketId: rawMarket.condition_id || rawMarket.id,
-    title: rawMarket.question || rawMarket.title,
+    title,
     description: rawMarket.description || '',
     options: rawMarket.outcomes || rawMarket.options || ['Yes', 'No'],
     status: rawMarket.closed ? 'closed' : 'active',
@@ -249,7 +271,7 @@ const parseMarket = (rawMarket) => {
     endDate: rawMarket.end_date_iso || rawMarket.endDate,
     currentPrices: rawMarket.outcome_prices || rawMarket.prices || [],
     image,
-    slug: rawMarket.slug || null,
+    slug,
     closed: rawMarket.closed || false
   };
 };
