@@ -272,6 +272,33 @@ const searchMarkets = async (query) => {
   }
 };
 
+const parseArrayField = (value) => {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const toNumericArray = (values) => {
+  return parseArrayField(values)
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+};
+
+const normalizeOptionLabels = (options) => {
+  return parseArrayField(options)
+    .map((option) => String(option).trim())
+    .filter((option) => option.length > 0);
+};
+
 /**
  * Generates a URL-safe slug from a string
  * @param {string} text - Text to slugify
@@ -300,16 +327,26 @@ const parseMarket = (rawMarket) => {
                 null;
 
   const title = rawMarket.question || rawMarket.title;
+  const options = normalizeOptionLabels(rawMarket.outcomes || rawMarket.options || ['Yes', 'No']);
+  const currentPrices = toNumericArray(rawMarket.outcome_prices || rawMarket.prices || []);
   
   // Use Gamma slug if available, otherwise generate from title
   // This ensures we always have a slug for Polymarket's /event/ URLs
   const slug = rawMarket.slug || rawMarket.market_slug || generateSlug(title) || null;
 
+  const optionPricePairs = options.map((option, index) => ({
+    option,
+    price: Number.isFinite(currentPrices[index]) ? currentPrices[index] : null
+  }));
+
+  const yesPair = optionPricePairs.find((entry) => entry.option.toLowerCase() === 'yes');
+  const noPair = optionPricePairs.find((entry) => entry.option.toLowerCase() === 'no');
+
   return {
     marketId: rawMarket.condition_id || rawMarket.id,
     title,
     description: rawMarket.description || '',
-    options: rawMarket.outcomes || rawMarket.options || ['Yes', 'No'],
+    options,
     status: rawMarket.closed ? 'closed' : 'active',
     liquidity: rawMarket.liquidity || 0,
     volume: rawMarket.volume || 0,
@@ -317,7 +354,9 @@ const parseMarket = (rawMarket) => {
     categories: rawMarket.tags || rawMarket.categories || [],
     createdAt: rawMarket.created_at || rawMarket.createdAt,
     endDate: rawMarket.end_date_iso || rawMarket.endDate,
-    currentPrices: rawMarket.outcome_prices || rawMarket.prices || [],
+    currentPrices,
+    yesPrice: yesPair ? yesPair.price : null,
+    noPrice: noPair ? noPair.price : null,
     image,
     slug,
     closed: rawMarket.closed || false
