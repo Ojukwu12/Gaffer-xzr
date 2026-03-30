@@ -287,6 +287,11 @@ FRONTEND_URL=http://localhost:3000
 # Admin auth
 ADMIN_SECRET_KEY=your_admin_secret_key
 ADMIN_API_KEY=your_admin_api_key
+ADMIN_EMAIL=admin@polyscope.app
+
+# Startup behavior:
+# - If ADMIN_EMAIL is set, backend syncs that email to an active admin user in DB.
+# - If ADMIN_API_KEY is set, it is applied to that admin user during startup sync.
 
 # Web Push (Optional)
 WEB_PUSH_VAPID_PUBLIC=your_public_key

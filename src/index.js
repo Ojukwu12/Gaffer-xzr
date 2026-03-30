@@ -6,6 +6,7 @@
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const helmet = require('helmet');
 const cors = require('cors');
 const { corsOptions } = require('./config/cors');
@@ -25,6 +26,57 @@ const randomBetween = (minMs, maxMs) => {
   const min = Math.max(0, Number(minMs) || 0);
   const max = Math.max(min, Number(maxMs) || min);
   return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
+/**
+ * Ensures ADMIN_EMAIL in env is mapped to an active admin user in DB.
+ * This keeps runtime auth (which checks DB role) aligned with env config.
+ */
+const ensureEnvAdminUser = async () => {
+  const configuredEmail = (config.adminEmail || '').trim().toLowerCase();
+  if (!configuredEmail) {
+    return;
+  }
+
+  const configuredApiKey = (process.env.ADMIN_API_KEY || '').trim();
+  let user = await User.findOne({ email: configuredEmail });
+
+  if (!user) {
+    const apiKey = configuredApiKey || crypto.randomBytes(32).toString('hex');
+    user = await User.create({
+      email: configuredEmail,
+      apiKey,
+      role: 'admin',
+      isActive: true,
+      metadata: {
+        createdBy: 'startup-admin-sync'
+      }
+    });
+
+    logger.warn(
+      `Created admin user from ADMIN_EMAIL (${configuredEmail}). ` +
+      `${configuredApiKey ? 'Using ADMIN_API_KEY from env.' : 'Generated API key automatically.'}`
+    );
+
+    if (!configuredApiKey) {
+      logger.warn(
+        'ADMIN_API_KEY is not set. A random admin API key was generated. ' +
+        'Set ADMIN_API_KEY in env to make admin auth deterministic across restarts.'
+      );
+    }
+
+    return;
+  }
+
+  const updates = {};
+  if (user.role !== 'admin') updates.role = 'admin';
+  if (!user.isActive) updates.isActive = true;
+  if (configuredApiKey && user.apiKey !== configuredApiKey) updates.apiKey = configuredApiKey;
+
+  if (Object.keys(updates).length > 0) {
+    await User.updateOne({ _id: user._id }, { $set: updates });
+    logger.info(`Synced admin user from ADMIN_EMAIL (${configuredEmail})`, updates);
+  }
 };
 
 // Import routes
@@ -332,6 +384,12 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDB();
     logger.info('Database connected successfully');
+
+    try {
+      await ensureEnvAdminUser();
+    } catch (adminSyncError) {
+      logger.warn(`Could not sync ADMIN_EMAIL to admin user: ${adminSyncError.message}`);
+    }
 
     try {
       const adminUsers = await User.find({ role: 'admin', isActive: true })

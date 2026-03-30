@@ -46,7 +46,13 @@ DEV_IP=your_dev_ip_for_rate_limit_bypass
 # Optional: Admin User
 ADMIN_EMAIL=admin@polyscope.com
 ADMIN_API_KEY=generate_secure_key_here
+ADMIN_SECRET_KEY=set_a_long_random_admin_secret
 ```
+
+Admin startup sync behavior:
+- If `ADMIN_EMAIL` is set, server startup ensures this email is an active admin user in MongoDB.
+- If `ADMIN_API_KEY` is set, startup sync applies it to that admin user.
+- Admin routes still require both headers: `x-admin-key` and `X-API-Key`.
 
 ## 2. Database Setup
 
