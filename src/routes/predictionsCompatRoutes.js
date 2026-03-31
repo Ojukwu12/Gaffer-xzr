@@ -14,7 +14,7 @@ const router = express.Router();
 // GET /api/predictions
 router.get('/',
   [
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('limit').optional().isInt({ min: 1, max: 500 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
@@ -27,7 +27,7 @@ router.get('/',
 // GET /api/predictions/approved
 router.get('/approved',
   [
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('limit').optional().isInt({ min: 1, max: 500 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
     query('timeframe').optional().isIn(['daily', 'weekly', 'monthly'])
   ],
