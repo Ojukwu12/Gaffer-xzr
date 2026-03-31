@@ -393,7 +393,12 @@ const generatePrediction = async (marketData, option, features, timeframe, retry
       try {
         text = await secondaryLlmService.generateSecondaryPrediction(prompt);
       } catch (secondaryError) {
-        logger.warn(`Secondary LLM failed, fallback to Gemini: ${secondaryError.message}`);
+          logger.warn('Secondary LLM failed, fallback to Gemini', {
+            message: secondaryError?.message,
+            status: secondaryError?.statusCode || secondaryError?.status || null,
+            code: secondaryError?.errorCode || null,
+            details: secondaryError?.details || null
+          });
         // Fallback to Gemini anyway
         useSecondaryLLM = false;
         const result = await model.generateContent(prompt);

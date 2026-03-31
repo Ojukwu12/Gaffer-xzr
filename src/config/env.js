@@ -176,6 +176,27 @@ const validateConfig = () => {
     // eslint-disable-next-line no-console
     console.warn(`Warning: ${msg}`);
   }
+
+  // Validate secondary LLM configuration (non-fatal, warns in all environments)
+  const secondaryProvider = (process.env.SECONDARY_LLM_PROVIDER || '').trim().toLowerCase();
+  if (secondaryProvider) {
+    if (!['claude', 'ollama'].includes(secondaryProvider)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `Warning: SECONDARY_LLM_PROVIDER is set to "${process.env.SECONDARY_LLM_PROVIDER}". Supported values are "claude" or "ollama".`
+      );
+    }
+
+    if (secondaryProvider === 'claude' && !process.env.SECONDARY_LLM_API_KEY) {
+      // eslint-disable-next-line no-console
+      console.warn('Warning: SECONDARY_LLM_PROVIDER=claude but SECONDARY_LLM_API_KEY is missing. Claude fallback will fail.');
+    }
+
+    if (secondaryProvider === 'ollama' && !process.env.OLLAMA_BASE_URL) {
+      // eslint-disable-next-line no-console
+      console.warn('Warning: SECONDARY_LLM_PROVIDER=ollama but OLLAMA_BASE_URL is missing. Ollama fallback will fail.');
+    }
+  }
 };
 
 validateConfig();

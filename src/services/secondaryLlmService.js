@@ -48,10 +48,28 @@ const generateClaudePrediction = async (prompt) => {
 
     return response.data.content[0].text;
   } catch (error) {
-    if (error?.response?.status === 429) {
+    const status = error?.response?.status || 500;
+    const responseData = error?.response?.data || null;
+    const requestId = error?.response?.headers?.['request-id'] || error?.response?.headers?.['x-request-id'] || null;
+
+    logger.error('Claude API request failed', {
+      status,
+      model: config.secondaryLlmModel,
+      requestId,
+      message: error?.message,
+      responseData
+    });
+
+    if (status === 429) {
       throw new CustomError('Claude rate limited', 429, 'CLAUDE_RATE_LIMITED');
     }
-    throw error;
+
+    throw new CustomError('Claude request failed', status, 'CLAUDE_REQUEST_FAILED', {
+      status,
+      requestId,
+      responseData,
+      message: error?.message
+    });
   }
 };
 
@@ -69,7 +87,7 @@ const generateOllamaPrediction = async (prompt) => {
     const response = await axios.post(
       `${config.ollamaBaseUrl}/api/generate`,
       {
-        model: 'mistral', // or 'llama2', adjust based on what's available
+        model: config.secondaryLlmModel || 'mistral',
         prompt: prompt,
         stream: false,
         temperature: 0.7
