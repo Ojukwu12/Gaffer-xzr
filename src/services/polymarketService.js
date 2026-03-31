@@ -33,7 +33,47 @@ const polymarketClient = axios.create({
  */
 const fetchMarkets = async (filters = {}) => {
   logger.info('Fetching markets from Polymarket', { filters });
-  
+
+  const requestedLimit = Number(filters.limit);
+  const requestedOffset = Number(filters.offset || 0);
+
+  if (Number.isFinite(requestedLimit) && requestedLimit > 0) {
+    const collected = [];
+    let offset = requestedOffset;
+    const pageSize = Math.min(100, Math.max(1, requestedLimit));
+
+    while (collected.length < requestedLimit) {
+      const remaining = requestedLimit - collected.length;
+      const currentLimit = Math.min(pageSize, remaining);
+
+      const response = await polymarketClient.get('/markets', {
+        params: {
+          closed: false,
+          active: true,
+          ...filters,
+          limit: currentLimit,
+          offset
+        }
+      });
+
+      const batch = Array.isArray(response.data) ? response.data : [];
+      if (batch.length === 0) {
+        break;
+      }
+
+      collected.push(...batch);
+      offset += batch.length;
+
+      // Provider returned fewer than requested for this page; likely no more markets.
+      if (batch.length < currentLimit) {
+        break;
+      }
+    }
+
+    logger.info(`Fetched ${collected.length} markets`);
+    return collected.slice(0, requestedLimit);
+  }
+
   const response = await polymarketClient.get('/markets', {
     params: {
       closed: false,
@@ -41,7 +81,7 @@ const fetchMarkets = async (filters = {}) => {
       ...filters
     }
   });
-  
+
   logger.info(`Fetched ${response.data.length || 0} markets`);
   return response.data;
 };
@@ -284,7 +324,8 @@ const fetchTrendingMarkets = async (limit = 10) => {
     // Fallback to a deterministic "trending-like" list from active markets sorted by activity.
     if (status === 422) {
       logger.info('Trending endpoint returned 422; falling back to active markets sorted by volume/liquidity');
-      const markets = await fetchMarkets({ closed: false, active: true });
+      const fallbackFetchLimit = Math.max(1, Number(limit) || 10);
+      const markets = await fetchMarkets({ closed: false, active: true, limit: fallbackFetchLimit });
 
       return (markets || [])
         .slice()

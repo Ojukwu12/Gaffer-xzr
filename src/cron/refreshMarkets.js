@@ -8,6 +8,7 @@ const { connectDB, closeDB } = require('../config/db');
 const logger = require('../config/logger');
 const polymarketService = require('../services/polymarketService');
 const cacheService = require('../services/cacheService');
+const config = require('../config/env');
 
 /**
  * Filters out expired markets
@@ -42,11 +43,19 @@ const refreshMarkets = async () => {
       await connectDB();
     }
     
-    // Fetch active markets
-    let markets = await polymarketService.fetchMarkets({ closed: false });
+    // Fetch active markets (optionally capped by env)
+    const refreshFetchFilters = { closed: false };
+    if (Number(config.refreshMarketFetchLimit) > 0) {
+      refreshFetchFilters.limit = Number(config.refreshMarketFetchLimit);
+    }
+
+    const markets = await polymarketService.fetchMarkets(refreshFetchFilters);
     fetchedCount = markets.length;
-    
-    logger.info(`Fetched ${fetchedCount} active markets`);
+
+    logger.info(
+      `Fetched ${fetchedCount} active markets ` +
+      `(refreshFetchLimit=${Number(config.refreshMarketFetchLimit) > 0 ? config.refreshMarketFetchLimit : 'provider_default'})`
+    );
     
     // Parse and filter out expired markets
     let parsedMarkets = markets.map(m => polymarketService.parseMarket(m));
@@ -60,11 +69,27 @@ const refreshMarkets = async () => {
       cachedCount++;
     }
     
-    // Cache market list
-    cacheService.cacheMarketList('all:all:all:all:50:0', parsedMarkets.slice(0, 50), 300);
+    // Cache market list (default API key path uses limit=50, offset=0)
+    const defaultListLimit = 50;
+    const marketListCacheLimit = Math.max(1, Number(config.refreshMarketListCacheLimit) || defaultListLimit);
+    cacheService.cacheMarketList(
+      `all:all:all:all:${defaultListLimit}:0`,
+      parsedMarkets.slice(0, defaultListLimit),
+      300
+    );
+
+    // Optionally prewarm a second list size for clients requesting a non-default limit.
+    if (marketListCacheLimit !== defaultListLimit) {
+      cacheService.cacheMarketList(
+        `all:all:all:all:${marketListCacheLimit}:0`,
+        parsedMarkets.slice(0, marketListCacheLimit),
+        300
+      );
+    }
     
     // Fetch and cache trending markets
-    let trendingMarkets = await polymarketService.fetchTrendingMarkets(20).catch(err => {
+    const trendingFetchLimit = Math.max(1, Number(config.refreshTrendingFetchLimit) || 20);
+    const trendingMarkets = await polymarketService.fetchTrendingMarkets(trendingFetchLimit).catch(err => {
       const status = err?.response?.status;
       if (status === 422) {
         logger.info(`[refreshMarkets][${runId}] Trending endpoint returned 422; skipping trending cache.`);
@@ -76,7 +101,8 @@ const refreshMarkets = async () => {
     
     if (trendingMarkets.length > 0) {
       let parsedTrending = trendingMarkets.map(m => polymarketService.parseMarket(m));
-      parsedTrending = filterExpiredMarkets(parsedTrending).slice(0, 10);
+      const trendingCacheLimit = Math.max(1, Number(config.refreshTrendingCacheLimit) || 10);
+      parsedTrending = filterExpiredMarkets(parsedTrending).slice(0, trendingCacheLimit);
       cacheService.cacheMarketList('trending', parsedTrending, 180);
       logger.info(`[refreshMarkets][${runId}] Cached ${parsedTrending.length} trending markets (after filtering expired)`);
     }
