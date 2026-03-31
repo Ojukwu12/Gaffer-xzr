@@ -278,7 +278,7 @@ const computeDynamicThresholds = (bucket) => {
 
   thresholds.minPredictability = clamp(Math.round(thresholds.minPredictability), 55, 95);
   thresholds.minConfidence = clamp(Math.round(thresholds.minConfidence), 0, 95);
-  thresholds.minProbabilityDiff = clamp(Math.round(thresholds.minProbabilityDiff), 8, 30);
+  thresholds.minProbabilityDiff = clamp(Math.round(thresholds.minProbabilityDiff), 0, 30);
   thresholds.minExpectedEdge = clamp(Math.round(thresholds.minExpectedEdge), 45, 95);
 
   return thresholds;
