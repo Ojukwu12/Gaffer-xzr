@@ -37,6 +37,9 @@ const corsOptions = {
     'Authorization',
     'X-Requested-With',
     'X-API-Key',
+    'x-api-key',
+    'x-admin-key',
+    'X-Admin-Key',
     'Accept',
     'Origin'
   ],

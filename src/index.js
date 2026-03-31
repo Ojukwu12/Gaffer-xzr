@@ -125,6 +125,7 @@ global.lastCronRun = null;
  */
 app.use(helmet()); // Security headers
 app.use(cors(corsOptions)); // Enable CORS with configuration
+app.options('*', cors(corsOptions)); // Ensure browser preflight requests succeed
 app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies
 
