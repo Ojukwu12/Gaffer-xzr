@@ -6,6 +6,11 @@
 
 const config = require('./env');
 
+const normalizeOrigin = (origin) => {
+  if (!origin || typeof origin !== 'string') return '';
+  return origin.trim().replace(/\/$/, '').toLowerCase();
+};
+
 // Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:3000',      // Local development (React/Next.js default)
@@ -16,17 +21,37 @@ const allowedOrigins = [
   'https://polyscope.app',      // Production domain (example)
   'https://www.polyscope.app',  // Production www subdomain
   // Add your production domain here
-  ...(config.allowedOrigins ? config.allowedOrigins.split(',') : [])
+  ...(config.allowedOrigins
+    ? config.allowedOrigins.split(',').map((item) => item.trim()).filter(Boolean)
+    : [])
 ];
+
+const normalizedAllowedOrigins = new Set(allowedOrigins.map(normalizeOrigin));
+
+const isLocalhostOrigin = (origin) => {
+  if (!origin) return false;
+
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin);
+};
 
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (
+      process.env.NODE_ENV === 'development' ||
+      normalizedAllowedOrigins.has('*') ||
+      normalizedAllowedOrigins.has(normalizedOrigin) ||
+      isLocalhostOrigin(normalizedOrigin)
+    ) {
       callback(null, true);
     } else {
+      // Include origin in error logs to speed up CORS troubleshooting.
+      // eslint-disable-next-line no-console
+      console.warn(`[cors] blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
