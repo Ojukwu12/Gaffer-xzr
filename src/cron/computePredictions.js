@@ -56,10 +56,18 @@ const computePredictions = async (options = {}) => {
       }
     }
     
-    // Fetch active markets
-    let markets = await polymarketService.fetchMarkets({ closed: false });
+    // Fetch active markets (optionally capped by env)
+    const marketFetchFilters = { closed: false };
+    if (Number(config.marketFetchLimit) > 0) {
+      marketFetchFilters.limit = Number(config.marketFetchLimit);
+    }
+
+    let markets = await polymarketService.fetchMarkets(marketFetchFilters);
     const fetchedCount = markets.length;
-    logger.info(`[computePredictions][${runId}] Fetched ${fetchedCount} active markets from Polymarket`);
+    logger.info(
+      `[computePredictions][${runId}] Fetched ${fetchedCount} active markets from Polymarket ` +
+      `(fetchLimit=${Number(config.marketFetchLimit) > 0 ? config.marketFetchLimit : 'provider_default'})`
+    );
     
     // Apply minimum liquidity and volume filters
     markets = markets.filter(m => 
@@ -105,12 +113,12 @@ const computePredictions = async (options = {}) => {
       marketsByCategory[category].push(market);
     }
     
-    // Get top N markets per category (sorted by liquidity, pick multiple for rotation)
+    // Get top N markets per category (sorted by liquidity)
     const selectedMarkets = [];
     for (const category in marketsByCategory) {
       const topMarkets = marketsByCategory[category]
         .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
-        .slice(0, Math.max(3, config.marketsPerCategory)); // Pick at least top 3 per category
+        .slice(0, Math.max(1, Number(config.marketsPerCategory) || 1));
       
       selectedMarkets.push(...topMarkets);
     }
@@ -121,7 +129,7 @@ const computePredictions = async (options = {}) => {
     logger.info(
       `[computePredictions][${runId}] Selected ${markets.length} markets across ` +
       `${Object.keys(marketsByCategory).length} categories ` +
-      `(rotation picks top 3+ markets per category, maxPerRun=${config.maxMarketsPerRun})`
+      `(perCategory=${config.marketsPerCategory}, maxPerRun=${config.maxMarketsPerRun})`
     );
 
     if (markets.length === 0) {

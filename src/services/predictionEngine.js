@@ -517,7 +517,7 @@ const validateMarketData = (marketData) => {
   const liquidity = marketData.liquidity || 0;
   if (liquidity === 0) {
     validationIssues.push('Market has 0 liquidity');
-  } else if (liquidity < 1000) {
+  } else if (liquidity < config.minLiquidityUsd) {
     validationIssues.push(`Low liquidity warning: $${liquidity.toLocaleString()}`);
   }
   
@@ -525,7 +525,7 @@ const validateMarketData = (marketData) => {
   const volume = marketData.volume24h || marketData.volume || 0;
   if (volume === 0) {
     validationIssues.push('Market has 0 volume');
-  } else if (volume < 100) {
+  } else if (volume < config.minVolume24hUsd) {
     validationIssues.push(`Low volume warning: $${volume.toLocaleString()}`);
   }
   
@@ -877,7 +877,7 @@ const detectAnomalies = (features, marketData) => {
     const anomalies = [];
     const liquidity = rawMarket.liquidity || 0;
 
-    if (liquidity > 0 && liquidity < 1000) {
+    if (liquidity > 0 && liquidity < config.minLiquidityUsd) {
       anomalies.push({ type: 'low_liquidity', message: 'Liquidity below threshold' });
     }
 

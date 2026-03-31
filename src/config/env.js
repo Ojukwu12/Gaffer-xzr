@@ -95,6 +95,7 @@ const config = {
   
   // Prediction Engine Configuration
   maxMarketsPerRun: parseInt(process.env.MAX_MARKETS_PER_RUN || '20', 10),
+  marketFetchLimit: parseInt(process.env.MARKET_FETCH_LIMIT || '0', 10),
   marketsPerCategory: parseInt(process.env.MARKETS_PER_CATEGORY || '1', 10),
   minLiquidityUsd: parseInt(process.env.MIN_LIQUIDITY_USD || '1000', 10),
   minVolume24hUsd: parseInt(process.env.MIN_VOLUME_24H_USD || '100', 10),
