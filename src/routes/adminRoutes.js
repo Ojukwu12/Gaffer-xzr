@@ -103,6 +103,21 @@ router.post('/test/email',
 );
 
 /**
+ * POST /api/admin/test/push-weekly-digest
+ * Trigger weekly push digest manually
+ */
+router.post('/test/push-weekly-digest',
+  [
+    body('windowDays')
+      .optional()
+      .isInt({ min: 1, max: 30 })
+      .toInt()
+  ],
+  validateRequest,
+  adminController.testWeeklyPushDigest
+);
+
+/**
  * POST /api/admin/cleanup/subscriptions
  * Clean up invalid subscriptions
  */

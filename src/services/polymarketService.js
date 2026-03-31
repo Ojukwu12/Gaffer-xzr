@@ -136,12 +136,118 @@ const fetchVolumeStats = async (marketId) => {
  */
 const fetchTopTraders = async (marketId, limit = 20) => {
   logger.info(`Fetching top traders for market: ${marketId}`);
-  
-  const response = await polymarketClient.get(`/markets/${marketId}/traders`, {
-    params: { limit }
-  });
-  
-  return response.data || [];
+
+  try {
+    const response = await polymarketClient.get(`/markets/${marketId}/traders`, {
+      params: { limit }
+    });
+
+    if (Array.isArray(response.data) && response.data.length > 0) {
+      return response.data;
+    }
+  } catch (error) {
+    const status = error?.response?.status;
+
+    // Some upstream deployments do not expose /markets/:id/traders.
+    // Fallback to deriving top traders from recent market trades.
+    if (![404, 422].includes(status)) {
+      logger.warn(`Primary traders endpoint failed for ${marketId}: ${error.message}`);
+    } else {
+      logger.info(`Traders endpoint unavailable (${status}) for ${marketId}; falling back to trade aggregation`);
+    }
+  }
+
+  try {
+    const trades = await fetchMarketTrades(marketId, { limit: 500, offset: 0 });
+    if (!Array.isArray(trades) || trades.length === 0) {
+      return [];
+    }
+
+    const now = Date.now();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const traderMap = new Map();
+
+    const getTradeTimestamp = (trade) => {
+      const raw = trade.createdAt || trade.created_at || trade.timestamp || trade.time || null;
+      const parsed = raw ? new Date(raw).getTime() : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const getTradeVolume = (trade) => {
+      const explicit = Number(trade.volume || trade.amount || 0);
+      if (Number.isFinite(explicit) && explicit > 0) {
+        return explicit;
+      }
+
+      const size = Number(trade.size || trade.quantity || 0);
+      const price = Number(trade.price || trade.rate || 0);
+      if (Number.isFinite(size) && Number.isFinite(price) && size > 0 && price > 0) {
+        return size * price;
+      }
+
+      return 0;
+    };
+
+    const extractAddresses = (trade) => {
+      const candidates = [
+        trade.trader,
+        trade.traderAddress,
+        trade.address,
+        trade.user,
+        trade.userAddress,
+        trade.wallet,
+        trade.walletAddress,
+        trade.maker,
+        trade.makerAddress,
+        trade.taker,
+        trade.takerAddress
+      ]
+        .map((value) => (value ? String(value).trim() : ''))
+        .filter((value) => value.length > 0);
+
+      return [...new Set(candidates)];
+    };
+
+    for (const trade of trades) {
+      const addresses = extractAddresses(trade);
+      if (addresses.length === 0) continue;
+
+      const volume = getTradeVolume(trade);
+      if (volume <= 0) continue;
+
+      const ts = getTradeTimestamp(trade);
+      const isRecent = ts ? (now - ts <= oneDayMs) : false;
+
+      for (const address of addresses) {
+        if (!traderMap.has(address)) {
+          traderMap.set(address, {
+            address,
+            volume: 0,
+            totalVolume: 0,
+            tradeCount: 0,
+            trades: 0,
+            volume24h: 0
+          });
+        }
+
+        const entry = traderMap.get(address);
+        entry.volume += volume;
+        entry.totalVolume += volume;
+        entry.tradeCount += 1;
+        entry.trades += 1;
+        if (isRecent) {
+          entry.volume24h += volume;
+        }
+      }
+    }
+
+    return [...traderMap.values()]
+      .sort((a, b) => b.volume - a.volume)
+      .slice(0, Math.max(1, Number(limit) || 20));
+  } catch (fallbackError) {
+    logger.warn(`Fallback trade aggregation failed for ${marketId}: ${fallbackError.message}`);
+    return [];
+  }
 };
 
 /**

@@ -242,6 +242,28 @@ const testEmail = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Trigger weekly push digest manually
+ * POST /api/admin/test/push-weekly-digest
+ */
+const testWeeklyPushDigest = asyncHandler(async (req, res) => {
+  const { windowDays = 7 } = req.body || {};
+
+  if (!Number.isInteger(Number(windowDays)) || Number(windowDays) < 1 || Number(windowDays) > 30) {
+    throw new CustomError('windowDays must be an integer between 1 and 30', 400, 'INVALID_WINDOW_DAYS');
+  }
+
+  logger.info(`Triggering manual weekly push digest for ${windowDays} day window`);
+
+  const result = await notificationService.sendWeeklyPushDigest({ windowDays: Number(windowDays) });
+
+  return success(res, {
+    triggered: true,
+    windowDays: Number(windowDays),
+    ...result
+  });
+});
+
+/**
  * Clean up subscriptions
  * POST /api/admin/cleanup/subscriptions
  */
@@ -818,6 +840,7 @@ module.exports = {
   invalidateMarketCache,
   testLLM,
   testEmail,
+  testWeeklyPushDigest,
   cleanupSubscriptions,
   getExternalDataDiagnostics,
   checkExternalSourcesHealth,

@@ -189,7 +189,9 @@ export default function PushNotificationSubscriber() {
               subscription,
               markets: [], // Optional: restrict to specific markets
               preferences: {
-                minConfidence: 65 // Only high-confidence predictions
+                minConfidence: 65, // Only high-confidence predictions
+                notifyOnResolution: true,
+                notifyWeeklyDigest: true
               }
             })
           }
@@ -286,6 +288,32 @@ When users subscribe to push notifications, they'll automatically receive a welc
 - Body: `Your push notifications are set up and ready to receive predictions!`
 
 Your service worker will receive and display this notification automatically.
+
+### 4. Manual Weekly Digest Test (Admin)
+
+Frontend/admin panel can trigger weekly push digest immediately without waiting for Monday cron:
+
+```javascript
+async function triggerWeeklyDigest(windowDays = 7) {
+  const response = await fetch('https://your-backend.com/api/admin/test/push-weekly-digest', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-key': 'your_admin_secret_key',
+      'X-API-Key': 'your_admin_api_key'
+    },
+    body: JSON.stringify({ windowDays })
+  });
+
+  const data = await response.json();
+  return data;
+}
+```
+
+Response includes:
+- `checked`: number of active push subscriptions evaluated
+- `sent`: number of successful digest pushes
+- `failed`: number of failed digest pushes
 
 ---
 

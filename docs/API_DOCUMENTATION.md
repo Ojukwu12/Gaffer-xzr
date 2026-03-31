@@ -502,6 +502,36 @@ Send a test notification through email and/or push.
 }
 ```
 
+#### POST /api/admin/test/push-weekly-digest
+Trigger weekly push digest manually (admin test endpoint).
+
+**Headers:**
+- `x-admin-key`: Admin secret key
+- `X-API-Key`: Admin API key
+
+**Body (optional):**
+```json
+{
+  "windowDays": 7
+}
+```
+
+`windowDays` must be an integer from 1 to 30 (default: 7).
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "triggered": true,
+    "windowDays": 7,
+    "checked": 42,
+    "sent": 37,
+    "failed": 5
+  }
+}
+```
+
 #### PATCH /api/notifications/preferences
 Update notification preferences for email or push subscriptions.
 
