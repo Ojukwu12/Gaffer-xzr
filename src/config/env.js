@@ -44,10 +44,25 @@ const config = {
   // Support both LLM_API_KEY and GEMINI_API_KEY for flexibility
   llmApiKey: process.env.LLM_API_KEY || process.env.GEMINI_API_KEY || '',
   
-  // Secondary LLM (fallback for rate limiting)
-  secondaryLlmProvider: process.env.SECONDARY_LLM_PROVIDER || '', // 'claude' or 'ollama'
+  // Secondary/Tertiary LLM fallback configuration
+  // Providers: 'auto', 'groq', 'openrouter', 'openai', 'claude', 'ollama'
+  secondaryLlmProvider: process.env.SECONDARY_LLM_PROVIDER || '',
+  secondaryLlmFallbackChain: process.env.SECONDARY_LLM_FALLBACK_CHAIN || 'groq,openrouter,openai',
   secondaryLlmApiKey: process.env.SECONDARY_LLM_API_KEY || '',
   secondaryLlmModel: process.env.SECONDARY_LLM_MODEL || 'claude-3-5-sonnet-20241022',
+
+  // Groq fallback provider
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+
+  // OpenRouter fallback provider
+  openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
+  openRouterModel: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+
+  // OpenAI optional fallback provider
+  openAiApiKey: process.env.OPENAI_API_KEY || '',
+  openAiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
   
   // Email Service Configuration (Brevo API)
@@ -177,13 +192,20 @@ const validateConfig = () => {
     console.warn(`Warning: ${msg}`);
   }
 
-  // Validate secondary LLM configuration (non-fatal, warns in all environments)
+  // Validate fallback LLM configuration (non-fatal, warns in all environments)
   const secondaryProvider = (process.env.SECONDARY_LLM_PROVIDER || '').trim().toLowerCase();
+  const fallbackChain = String(process.env.SECONDARY_LLM_FALLBACK_CHAIN || 'groq,openrouter,openai')
+    .split(',')
+    .map((provider) => provider.trim().toLowerCase())
+    .filter(Boolean);
+
+  const supportedFallbackProviders = ['auto', 'claude', 'ollama', 'groq', 'openrouter', 'openai'];
+
   if (secondaryProvider) {
-    if (!['claude', 'ollama'].includes(secondaryProvider)) {
+    if (!supportedFallbackProviders.includes(secondaryProvider)) {
       // eslint-disable-next-line no-console
       console.warn(
-        `Warning: SECONDARY_LLM_PROVIDER is set to "${process.env.SECONDARY_LLM_PROVIDER}". Supported values are "claude" or "ollama".`
+        `Warning: SECONDARY_LLM_PROVIDER is set to "${process.env.SECONDARY_LLM_PROVIDER}". Supported values are ${supportedFallbackProviders.join(', ')}.`
       );
     }
 
@@ -192,9 +214,53 @@ const validateConfig = () => {
       console.warn('Warning: SECONDARY_LLM_PROVIDER=claude but SECONDARY_LLM_API_KEY is missing. Claude fallback will fail.');
     }
 
+    if (secondaryProvider === 'groq' && !process.env.GROQ_API_KEY) {
+      // eslint-disable-next-line no-console
+      console.warn('Warning: SECONDARY_LLM_PROVIDER=groq but GROQ_API_KEY is missing. Groq fallback will fail.');
+    }
+
+    if (secondaryProvider === 'openrouter' && !process.env.OPENROUTER_API_KEY) {
+      // eslint-disable-next-line no-console
+      console.warn('Warning: SECONDARY_LLM_PROVIDER=openrouter but OPENROUTER_API_KEY is missing. OpenRouter fallback will fail.');
+    }
+
+    if (secondaryProvider === 'openai' && !process.env.OPENAI_API_KEY) {
+      // eslint-disable-next-line no-console
+      console.warn('Warning: SECONDARY_LLM_PROVIDER=openai but OPENAI_API_KEY is missing. OpenAI fallback will fail.');
+    }
+
     if (secondaryProvider === 'ollama' && !process.env.OLLAMA_BASE_URL) {
       // eslint-disable-next-line no-console
       console.warn('Warning: SECONDARY_LLM_PROVIDER=ollama but OLLAMA_BASE_URL is missing. Ollama fallback will fail.');
+    }
+
+    if (secondaryProvider === 'auto') {
+      if (fallbackChain.length === 0) {
+        // eslint-disable-next-line no-console
+        console.warn('Warning: SECONDARY_LLM_PROVIDER=auto but SECONDARY_LLM_FALLBACK_CHAIN is empty. Auto fallback will fail.');
+      }
+
+      const keyByProvider = {
+        claude: process.env.SECONDARY_LLM_API_KEY,
+        groq: process.env.GROQ_API_KEY,
+        openrouter: process.env.OPENROUTER_API_KEY,
+        openai: process.env.OPENAI_API_KEY,
+        ollama: process.env.OLLAMA_BASE_URL
+      };
+
+      const usableProviders = fallbackChain.filter((provider) => {
+        if (!supportedFallbackProviders.includes(provider) || provider === 'auto') {
+          return false;
+        }
+        return Boolean(keyByProvider[provider]);
+      });
+
+      if (usableProviders.length === 0) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          'Warning: SECONDARY_LLM_PROVIDER=auto but no providers in SECONDARY_LLM_FALLBACK_CHAIN are configured with required credentials/endpoints.'
+        );
+      }
     }
   }
 };
