@@ -13,6 +13,7 @@ const PredictionRecord = require('../models/PredictionRecord');
 const cacheService = require('../services/cacheService');
 const emailService = require('../services/emailService');
 const notificationService = require('../services/notificationService');
+const predictionTrackingService = require('../services/predictionTrackingService');
 const config = require('../config/env');
 
 const deriveMarketCategory = (market = {}) => {
@@ -38,6 +39,13 @@ const deriveMarketCategory = (market = {}) => {
   return normalized || 'other';
 };
 
+const normalizePredictionAnswerFromOption = (option = '') => {
+  const normalized = String(option || '').trim().toLowerCase();
+  if (['yes', 'true', '1'].includes(normalized)) return 'YES';
+  if (['no', 'false', '0'].includes(normalized)) return 'NO';
+  return 'YES';
+};
+
 /**
  * Main computation function
  */
@@ -50,7 +58,7 @@ const computePredictions = async (options = {}) => {
   let processedCount = 0;
   let successCount = 0;
   let failedCount = 0;
-  let skippedCount = 0;
+  const skippedCount = 0;
   const skippedReasons = {};
   const notifications = [];
   let expiredCleanup = { scanned: 0, expired: 0 };
@@ -210,11 +218,61 @@ const computePredictions = async (options = {}) => {
             
           } catch (predError) {
             if (predError.errorCode === 'MARKET_UNPREDICTABLE' || predError.errorCode === 'PREDICTION_FILTERED_OUT') {
-              skippedCount++;
+              const issueCode = predError.errorCode;
               const reasonKey = predError.errorCode === 'MARKET_UNPREDICTABLE' ? 'unpredictable_market' : 'quality_gate_filtered';
               skippedReasons[reasonKey] = (skippedReasons[reasonKey] || 0) + 1;
+
+              const issueDetails = predError.details || {};
+              const polymarketUrl = parsedMarket.polymarketUrl || polymarketService.getMarketUrl({
+                marketId: parsedMarket.marketId,
+                slug: parsedMarket.slug || null,
+                eventSlug: parsedMarket.eventSlug || null
+              });
+
+              const impliedProbability = Number(parsedMarket.yesPrice ?? parsedMarket.currentPrice ?? 50);
+              const normalizedImpliedProbability = Number.isFinite(impliedProbability)
+                ? Math.max(0, Math.min(100, impliedProbability))
+                : null;
+
+              const placeholderConfidence = Number(issueDetails.confidenceScore);
+              const predictionConfidence = Number.isFinite(placeholderConfidence)
+                ? Math.max(0, Math.min(100, placeholderConfidence))
+                : 0;
+
+              await predictionTrackingService.recordPrediction({
+                marketId: parsedMarket.marketId,
+                marketTitle: parsedMarket.title,
+                marketSlug: parsedMarket.slug || null,
+                polymarketUrl,
+                option: options[0],
+                timeframe,
+                predictionType: 'option',
+                status: 'pending',
+                evaluationMode: config.predictionMode,
+                predictedAnswer: normalizePredictionAnswerFromOption(options[0]),
+                confidence: predictionConfidence,
+                marketProbabilityAtTime: normalizedImpliedProbability,
+                aiProbability: null,
+                marketClassification: issueDetails.marketClassification || null,
+                marketPredictabilityScore: issueDetails.marketPredictabilityScore ?? null,
+                signalStrengthScore: issueDetails.signalStrengthScore ?? null,
+                differenceBetweenMarketProbabilityAndAI: issueDetails.differenceBetweenMarketProbabilityAndAI ?? null,
+                mispricingScore: issueDetails.mispricingScore ?? null,
+                mispricingDirection: issueDetails.mispricingDirection || 'unknown',
+                expectedEdgeScore: issueDetails.expectedEdgeScore ?? null,
+                marketBucket: issueDetails.marketBucket || null,
+                thresholdsUsed: issueDetails.thresholds || null,
+                reason: `Data issue: ${predError.message}`,
+                dataIssue: {
+                  code: issueCode,
+                  note: predError.message,
+                  details: issueDetails
+                }
+              });
+
+              successCount++;
               logger.info(
-                `Prediction skipped for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`,
+                `Prediction queued with dataIssue for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`,
                 predError.details || {}
               );
               continue;

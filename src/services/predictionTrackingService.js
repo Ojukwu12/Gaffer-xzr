@@ -109,6 +109,7 @@ const recordPrediction = async (payload) => {
     marketBucket: payload.marketBucket || null,
     thresholdsUsed: payload.thresholdsUsed || null,
     reason: payload.reason,
+    dataIssue: payload.dataIssue || null,
     predictedAt: new Date()
   });
 };
