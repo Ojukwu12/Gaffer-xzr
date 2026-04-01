@@ -15,6 +15,29 @@ const emailService = require('../services/emailService');
 const notificationService = require('../services/notificationService');
 const config = require('../config/env');
 
+const deriveMarketCategory = (market = {}) => {
+  const tagValue = Array.isArray(market.tags) && market.tags.length > 0
+    ? (typeof market.tags[0] === 'string' ? market.tags[0] : market.tags[0]?.name)
+    : null;
+  const categoryValue = Array.isArray(market.categories) && market.categories.length > 0
+    ? market.categories[0]
+    : null;
+
+  const candidates = [
+    market.category,
+    market.marketCategory,
+    market.categorySlug,
+    categoryValue,
+    tagValue
+  ];
+
+  const normalized = candidates
+    .map((value) => String(value || '').trim().toLowerCase())
+    .find((value) => value.length > 0);
+
+  return normalized || 'other';
+};
+
 /**
  * Main computation function
  */
@@ -106,29 +129,39 @@ const computePredictions = async (options = {}) => {
     // Group fresh markets by category and select top markets per category
     const marketsByCategory = {};
     for (const market of freshMarkets) {
-      const category = market.category || 'Other';
+      const category = deriveMarketCategory(market);
       if (!marketsByCategory[category]) {
         marketsByCategory[category] = [];
       }
       marketsByCategory[category].push(market);
     }
-    
-    // Get top N markets per category (sorted by liquidity)
-    const selectedMarkets = [];
-    for (const category in marketsByCategory) {
-      const topMarkets = marketsByCategory[category]
+
+    const categoryCount = Object.keys(marketsByCategory).length;
+    const perCategoryLimit = Math.max(1, Number(config.marketsPerCategory) || 1);
+
+    // When category diversity is low, avoid under-selecting by falling back to global top-liquidity picks.
+    if (categoryCount <= 1) {
+      markets = freshMarkets
+        .slice()
         .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
-        .slice(0, Math.max(1, Number(config.marketsPerCategory) || 1));
-      
-      selectedMarkets.push(...topMarkets);
+        .slice(0, Number(config.maxMarketsPerRun) || 20);
+    } else {
+      const selectedMarkets = [];
+      for (const category in marketsByCategory) {
+        const topMarkets = marketsByCategory[category]
+          .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
+          .slice(0, perCategoryLimit);
+
+        selectedMarkets.push(...topMarkets);
+      }
+
+      // Limit to configured max markets
+      markets = selectedMarkets.slice(0, Number(config.maxMarketsPerRun) || 20);
     }
-    
-    // Limit to configured max markets
-    markets = selectedMarkets.slice(0, config.maxMarketsPerRun);
     
     logger.info(
       `[computePredictions][${runId}] Selected ${markets.length} markets across ` +
-      `${Object.keys(marketsByCategory).length} categories ` +
+      `${categoryCount} categories ` +
       `(perCategory=${config.marketsPerCategory}, maxPerRun=${config.maxMarketsPerRun})`
     );
 
