@@ -56,6 +56,65 @@ const formatProbabilityStatement = (marketProbabilityAtTime, aiProbability) => {
   return `The market shows ${marketProb}%, but our model estimates the real probability is ${modelProb}%.`;
 };
 
+const normalizeDisplayText = (value = '') => String(value || '').replace(/\s+/g, ' ').trim();
+
+const humanizeIssueLabel = (value = '') => normalizeDisplayText(String(value).replace(/[_-]+/g, ' '));
+
+const summarizeIssueValue = (value, depth = 0) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return normalizeDisplayText(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => summarizeIssueValue(item, depth + 1))
+      .filter(Boolean)
+      .join('; ');
+  }
+  if (typeof value !== 'object' || depth > 2) return '';
+
+  const nestedMessages = Array.isArray(value.issues)
+    ? value.issues
+      .map((item) => summarizeIssueValue(item, depth + 1))
+      .filter(Boolean)
+    : [];
+
+  if (nestedMessages.length > 0) {
+    return nestedMessages.slice(0, 3).join('; ');
+  }
+
+  const directMessage = normalizeDisplayText(
+    value.message || value.summary || value.note || value.reason || ''
+  );
+  if (directMessage) return directMessage;
+
+  if (value.type) return humanizeIssueLabel(value.type);
+  if (value.severity) return `${humanizeIssueLabel(value.severity)} issue`;
+
+  return '';
+};
+
+const resolveAdminIssue = (record) => {
+  const issueText = summarizeIssueValue(record?.dataIssue);
+  if (issueText) return issueText;
+
+  if (record?.marketClassification === 'unpredictable/noise') {
+    return 'This market is highly volatile and should be reviewed carefully before approval.';
+  }
+
+  return null;
+};
+
+const toAdminPredictionPayload = (record) => {
+  const baseRecord = typeof record?.toObject === 'function'
+    ? record.toObject()
+    : { ...(record || {}) };
+  const { dataIssue, ...safeRecord } = baseRecord;
+
+  return {
+    ...safeRecord,
+    issue: resolveAdminIssue(record)
+  };
+};
+
 const resolveDisplayReason = (record) => {
   const baseStatement = formatProbabilityStatement(record.marketProbabilityAtTime, record.aiProbability);
   if (!record.reason) return baseStatement;
@@ -578,5 +637,7 @@ module.exports = {
   buildCrowdSummary,
   formatProbabilityStatement,
   resolveDisplayReason,
+  resolveAdminIssue,
+  toAdminPredictionPayload,
   markExpiredPredictions
 };

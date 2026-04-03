@@ -45,6 +45,8 @@ const scheduleApprovedPredictionNotification = (prediction) => {
   }, delayMs);
 };
 
+const toAdminPredictionPayload = (prediction) => predictionModerationService.toAdminPredictionPayload(prediction);
+
 /**
  * Clear cache
  * POST /api/admin/cache/clear
@@ -637,7 +639,7 @@ const listPredictions = asyncHandler(async (req, res) => {
   return success(res, {
     total: result.total,
     count: result.items.length,
-    predictions: result.items
+    predictions: result.items.map(toAdminPredictionPayload)
   });
 });
 
@@ -668,7 +670,7 @@ const listPredictionsByStatus = asyncHandler(async (req, res) => {
     status,
     total: result.total,
     count: result.items.length,
-    predictions: result.items
+    predictions: result.items.map(toAdminPredictionPayload)
   });
 });
 
@@ -697,7 +699,7 @@ const approvePrediction = asyncHandler(async (req, res) => {
 
   return success(res, {
     approved: true,
-    prediction,
+    prediction: toAdminPredictionPayload(prediction),
     publication: {
       scheduled: true,
       delayMs: approvalResult?.publicationDelayMs || 0
@@ -726,7 +728,7 @@ const rejectPrediction = asyncHandler(async (req, res) => {
 
   return success(res, {
     rejected: true,
-    prediction
+    prediction: toAdminPredictionPayload(prediction)
   });
 });
 
@@ -755,7 +757,7 @@ const editPredictionProbability = asyncHandler(async (req, res) => {
 
   return success(res, {
     updated: true,
-    prediction
+    prediction: toAdminPredictionPayload(prediction)
   });
 });
 
@@ -784,7 +786,7 @@ const editApprovedPredictionProbability = asyncHandler(async (req, res) => {
 
   return success(res, {
     updated: true,
-    prediction
+    prediction: toAdminPredictionPayload(prediction)
   });
 });
 

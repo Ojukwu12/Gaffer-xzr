@@ -75,50 +75,234 @@ const reasonLooksGeneric = (reason = '', anchors = { tokens: [], entities: [] })
   return hasGenericPhrase || !hasNumericEvidence || !hasAnchor;
 };
 
+const formatCount = (value, suffix = '') => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return `${Math.round(numeric).toLocaleString()}${suffix}`;
+};
+
+const getExternalLayer = (features = {}) => features.externalDataLayer || {};
+
+const formatScore = (value, fallback = null) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return `${Math.round(numeric)}%`;
+};
+
+const buildSportReason = ({ title, selected, optionContext, features }) => {
+  const scores = features.externalDataScores || {};
+  const rawContext = getExternalLayer(features).rawContext || {};
+  const sportsSignals = [];
+
+  const teamForm = formatScore(scores.teamFormScore);
+  if (teamForm) sportsSignals.push(`team form ${teamForm}`);
+
+  const injuryImpact = formatScore(scores.injuryImpactScore);
+  if (injuryImpact) sportsSignals.push(`injury impact ${injuryImpact}`);
+
+  const fixturesScore = formatScore(scores.fixturesScore);
+  if (fixturesScore) sportsSignals.push(`fixture load ${fixturesScore}`);
+
+  const homeAway = formatScore(scores.homeAwayPerformanceScore);
+  if (homeAway) sportsSignals.push(`home/away performance ${homeAway}`);
+
+  if (Number.isFinite(Number(rawContext.matchesAnalyzed))) {
+    sportsSignals.push(`${Math.round(Number(rawContext.matchesAnalyzed))} recent matches analyzed`);
+  }
+
+  if (Number.isFinite(Number(rawContext.fixturesAnalyzed))) {
+    sportsSignals.push(`${Math.round(Number(rawContext.fixturesAnalyzed))} upcoming fixtures checked`);
+  }
+
+  if (Number.isFinite(Number(rawContext.injuriesConsidered)) && Number(rawContext.injuriesConsidered) > 0) {
+    sportsSignals.push(`${Math.round(Number(rawContext.injuriesConsidered))} injuries considered`);
+  }
+
+  const evidence = sportsSignals.length > 0 ? sportsSignals.slice(0, 4).join(', ') : 'recent form and availability signals';
+  return `${title}: ${selected} is the current lean${optionContext} because the team evidence is stronger on ${evidence}. The market price is only a secondary check here.`;
+};
+
+const buildFinancialReason = ({ title, selected, optionContext, features }) => {
+  const scores = features.externalDataScores || {};
+  const signals = [];
+
+  const trendScore = formatScore(scores.trendScore);
+  if (trendScore) signals.push(`trend ${trendScore}`);
+
+  const momentumScore = formatScore(scores.priceMomentumScore);
+  if (momentumScore) signals.push(`momentum ${momentumScore}`);
+
+  const volatilityScore = formatScore(scores.volatilityScore);
+  if (volatilityScore) signals.push(`volatility ${volatilityScore}`);
+
+  const volumeStrength = formatScore(scores.volumeStrengthScore);
+  if (volumeStrength) signals.push(`volume strength ${volumeStrength}`);
+
+  const price24h = Number.isFinite(Number(scores.priceChange24h)) ? `${Number(scores.priceChange24h).toFixed(2)}% 24h` : null;
+  const price7d = Number.isFinite(Number(scores.priceChange7d)) ? `${Number(scores.priceChange7d).toFixed(2)}% 7d` : null;
+  if (price24h) signals.push(price24h);
+  if (price7d) signals.push(price7d);
+
+  const evidence = signals.length > 0 ? signals.slice(0, 4).join(', ') : 'trend, momentum, and volatility';
+  return `${title}: ${selected} is the current lean${optionContext} because the financial evidence favors ${evidence}. The market price is only supporting context, not the main driver.`;
+};
+
+const buildPoliticsReason = ({ title, selected, optionContext, features }) => {
+  const scores = features.externalDataScores || {};
+  const signals = [];
+
+  const polling = formatScore(scores.pollingMomentumScore);
+  if (polling) signals.push(`polling momentum ${polling}`);
+
+  const narrative = formatScore(scores.narrativeShiftScore);
+  if (narrative) signals.push(`narrative shift ${narrative}`);
+
+  const diplomacy = formatScore(scores.diplomaticProgressScore);
+  if (diplomacy) signals.push(`diplomatic progress ${diplomacy}`);
+
+  const evidence = signals.length > 0 ? signals.slice(0, 3).join(', ') : 'polling, narrative, and event signals';
+  return `${title}: ${selected} is the current lean${optionContext} because the political evidence is stronger on ${evidence}. The market price is secondary to the underlying data.`;
+};
+
+const buildCorporateReason = ({ title, selected, optionContext, features }) => {
+  const scores = features.externalDataScores || {};
+  const signals = [];
+
+  const earnings = formatScore(scores.earningsSurpriseTrendScore);
+  if (earnings) signals.push(`earnings surprise ${earnings}`);
+
+  const product = formatScore(scores.productMomentumScore);
+  if (product) signals.push(`product momentum ${product}`);
+
+  const evidence = signals.length > 0 ? signals.slice(0, 2).join(', ') : 'earnings and product news';
+  return `${title}: ${selected} is the current lean${optionContext} because the company evidence is stronger on ${evidence}. The market quote is a check, not the thesis.`;
+};
+
+const buildNoiseReason = ({ title, selected, optionContext, features }) => {
+  const signals = [];
+  if (features.trendDirection) signals.push(`trend ${normalizeText(features.trendDirection)}`);
+  if (features.sentimentLabel) signals.push(`sentiment ${normalizeText(features.sentimentLabel)}`);
+  if (Number.isFinite(Number(features.externalDataCompositeScore))) {
+    signals.push(`external data ${toPercent(features.externalDataCompositeScore)}%`);
+  }
+  if (Number.isFinite(Number(features.priceVolatility))) {
+    signals.push(`volatility ${Math.round(Number(features.priceVolatility) * 100)}%`);
+  }
+
+  const evidence = signals.length > 0 ? signals.slice(0, 3).join(', ') : 'the limited usable signals available';
+  return `This market is highly volatile and can change quickly. ${title}: ${selected} is still the current lean${optionContext} because ${evidence}. Recheck it as soon as new information lands.`;
+};
+
+const buildCategoryReason = ({ title, selected, optionContext, features }) => {
+  const category = normalizeText(features.marketClassification || '').toLowerCase();
+
+  if (category === 'sports') {
+    return buildSportReason({ title, selected, optionContext, features });
+  }
+
+  if (category === 'finance/economy' || category === 'crypto') {
+    return buildFinancialReason({ title, selected, optionContext, features });
+  }
+
+  if (category === 'politics' || category === 'geopolitics' || category === 'global events') {
+    return buildPoliticsReason({ title, selected, optionContext, features });
+  }
+
+  if (category === 'technology' || category === 'corporate') {
+    return buildCorporateReason({ title, selected, optionContext, features });
+  }
+
+  if (category === 'unpredictable/noise') {
+    return buildNoiseReason({ title, selected, optionContext, features });
+  }
+
+  return null;
+};
+
+const collectEvidenceSignals = (features = {}) => {
+  const signals = [];
+
+  if (features.externalDataSourceType) {
+    signals.push(normalizeText(features.externalDataSourceType));
+  }
+
+  if (Number.isFinite(Number(features.externalDataCompositeScore))) {
+    signals.push(`external data score ${toPercent(features.externalDataCompositeScore)}%`);
+  }
+
+  if (features.trendDirection) {
+    const trendScore = Number.isFinite(Number(features.trendScore))
+      ? ` (${Math.round(Number(features.trendScore) * 100)}%)`
+      : '';
+    signals.push(`trend ${normalizeText(features.trendDirection)}${trendScore}`);
+  }
+
+  if (features.sentimentLabel) {
+    const sentimentScore = Number.isFinite(Number(features.sentimentScore))
+      ? ` (${Math.round(Number(features.sentimentScore) * 100)}%)`
+      : '';
+    signals.push(`sentiment ${normalizeText(features.sentimentLabel)}${sentimentScore}`);
+  }
+
+  const volumeLabel = formatCount(features.volume24h, ' in 24h');
+  if (volumeLabel) signals.push(`volume ${volumeLabel}`);
+
+  const liquidityLabel = formatCount(features.liquidity, ' liquidity');
+  if (liquidityLabel) signals.push(liquidityLabel);
+
+  if (Number.isFinite(Number(features.volumeGrowth24h))) {
+    signals.push(`24h volume growth ${Math.round(Number(features.volumeGrowth24h))}%`);
+  }
+
+  if (Number.isFinite(Number(features.whaleFactor))) {
+    signals.push(`whale factor ${Math.round(Number(features.whaleFactor) * 100)}%`);
+  }
+
+  if (Array.isArray(features.anomalyDetails) && features.anomalyDetails.length > 0) {
+    signals.push(normalizeText(features.anomalyDetails[0]));
+  }
+
+  return signals.filter(Boolean).slice(0, 4);
+};
+
 const buildMarketSpecificReason = ({ prediction = {}, marketData = {}, option = '', features = {} }) => {
   const title = normalizeText(marketData.title || marketData.question || 'this market');
   const selected = String(prediction.prediction || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO';
-  const yesProbability = toPercent(prediction.yes_probability, toPercent(prediction.confidence, 50));
-  const noProbability = toPercent(prediction.no_probability, toPercent(100 - yesProbability, 50));
-  const selectedProbability = selected === 'YES' ? yesProbability : noProbability;
-  const altProbability = selected === 'YES' ? noProbability : yesProbability;
+  const classification = normalizeText(features.marketClassification || '').toLowerCase();
+  const marketPrice = Number.isFinite(Number(features.impliedProbability))
+    ? `The market is pricing it at ${toPercent(features.impliedProbability)}%, which is secondary to the underlying evidence.`
+    : 'The market price is secondary to the underlying evidence.';
+  const optionLabel = normalizeText(option);
+  const optionContext = optionLabel && !['yes', 'no'].includes(optionLabel.toLowerCase())
+    ? ` for ${optionLabel}`
+    : '';
 
-  const signalParts = [];
-
-  if (Number.isFinite(Number(features.impliedProbability))) {
-    signalParts.push(`market-implied probability is ${toPercent(features.impliedProbability)}%`);
-  }
-  if (Number.isFinite(Number(features.volume24h))) {
-    signalParts.push(`24h volume is $${Math.round(Number(features.volume24h)).toLocaleString()}`);
-  }
-  if (Number.isFinite(Number(features.liquidity))) {
-    signalParts.push(`liquidity is $${Math.round(Number(features.liquidity)).toLocaleString()}`);
-  }
-  if (features.trendDirection) {
-    signalParts.push(`trend is ${features.trendDirection}`);
-  }
-  if (features.sentimentLabel) {
-    signalParts.push(`sentiment is ${features.sentimentLabel}`);
-  }
-  if (Number.isFinite(Number(features.whaleFactor))) {
-    signalParts.push(`whale factor is ${Math.round(Number(features.whaleFactor) * 100)}%`);
-  }
-  if (Number.isFinite(Number(features.externalDataCompositeScore))) {
-    signalParts.push(`external score is ${toPercent(features.externalDataCompositeScore)}%`);
+  const categoryReason = buildCategoryReason({ title, selected, optionContext, features });
+  if (categoryReason) {
+    return [
+      categoryReason,
+      marketPrice,
+      classification === 'unpredictable/noise'
+        ? 'The view should be revisited as soon as new data changes the setup.'
+        : 'The view can still change if the underlying evidence shifts.'
+    ].join(' ');
   }
 
-  const advantage = selectedProbability - altProbability;
-  const reasonText = advantage > 30 
-    ? `${selected} is significantly more likely with a ${advantage.toFixed(1)} point advantage.`
-    : advantage > 15
-      ? `${selected} has a meaningful advantage at ${advantage.toFixed(1)} points over the alternative.`
-      : `${selected} edges out the alternative with ${advantage.toFixed(1)} point higher probability.`;
+  const evidenceSignals = collectEvidenceSignals(features);
+  const evidenceText = evidenceSignals.length > 0
+    ? evidenceSignals.join(', ')
+    : 'the strongest available real-world and market signals';
 
-  const topSignals = signalParts.slice(0, 3).join(', ');
-  const classification = features.marketClassification ? ` (${features.marketClassification})` : '';
-  const optionLabel = normalizeText(option) || 'selected option';
-
-  return `${title}${classification}: choose ${selected} for ${optionLabel} because the model estimates ${selected} at ${selectedProbability}%. ${reasonText} This call is supported by ${topSignals || 'the strongest available market and model signals for this specific market'}.`;
+  return [
+    classification === 'unpredictable/noise'
+      ? 'This market is highly volatile and can flip quickly when new information arrives.'
+      : null,
+    `${title}: ${selected} is the current lean${optionContext} because ${evidenceText}.`,
+    marketPrice,
+    classification === 'unpredictable/noise'
+      ? 'The view should be revisited as soon as new data changes the setup.'
+      : 'The view can still change if the underlying evidence shifts.'
+  ].filter(Boolean).join(' ');
 };
 
 const ensureMarketSpecificReason = ({ reason, prediction, marketData, option, features }) => {
@@ -279,7 +463,11 @@ Always explain why the chosen side beats the other.
 
 Reason MUST be market-specific. Name the actual subject (team/country/company/event) from the market title.
 
-Reason MUST cite at least two numeric signals from provided metrics (percentages, liquidity, volume, trend/sentiment scores).
+Prefer concrete evidence over market price. Use numeric signals when they help, but do not force percentage-heavy wording.
+
+If the market is unpredictable/noise, start with a brief volatility disclaimer.
+
+Use market price as secondary context, not the main argument.
 
 Do NOT output generic template language that could fit any market.
 
