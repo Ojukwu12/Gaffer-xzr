@@ -379,6 +379,41 @@ const applyMlCorrectionLayer = (llmResult, features = {}, gatingContext = {}) =>
   };
 };
 
+const looksLikeExtraordinaryClaimMarket = (marketData = {}) => {
+  const text = `${marketData.title || ''} ${marketData.question || ''} ${marketData.description || ''}`.toLowerCase();
+  const hasReligiousReturnSignal = /(jesus|christ|second coming|messiah|rapture)/i.test(text);
+  const hasNearTermComparator = /(before gta\s*(vi|6)|before\s+gta|before\s+release|by\s+20\d{2})/i.test(text);
+  return hasReligiousReturnSignal && hasNearTermComparator;
+};
+
+const applyRealityPrior = (llmResult = {}, marketData = {}) => {
+  if (!looksLikeExtraordinaryClaimMarket(marketData)) {
+    return llmResult;
+  }
+
+  const targetYesProbability = 12;
+  const adjustedYes = Math.min(Number(llmResult.yes_probability || targetYesProbability), targetYesProbability);
+  const adjustedNo = clamp(100 - adjustedYes, 0, 100);
+
+  const baseReason = String(llmResult.reason || '').trim();
+  const priorNote = 'Extraordinary-claim prior applied: this outcome has an extremely low near-term base rate, so the model heavily favors NO unless hard evidence emerges.';
+  const mergedReason = baseReason
+    ? `${priorNote} ${baseReason}`
+    : priorNote;
+
+  return {
+    ...llmResult,
+    prediction: 'NO',
+    yes_probability: Number(adjustedYes.toFixed(2)),
+    no_probability: Number(adjustedNo.toFixed(2)),
+    confidence: clamp(Math.max(Number(llmResult.confidence || 0), 80), 0, 100),
+    reason: mergedReason,
+    notes: llmResult.notes
+      ? `${llmResult.notes} Reality prior adjusted the YES probability downward.`
+      : 'Reality prior adjusted the YES probability downward.'
+  };
+};
+
 const ensureMarketIsPredictable = ({ marketData, features }) => {
   const marketClassification = classifyMarket(marketData);
   const marketBucket = getMarketBucket(features, marketClassification);
@@ -1050,9 +1085,10 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
 
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
   const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
+  const realityAdjustedLlmResult = applyRealityPrior(correctedLlmResult, marketData);
 
   const qualityGates = enforcePredictionQualityGates({
-    llmResult: correctedLlmResult,
+    llmResult: realityAdjustedLlmResult,
     features,
     gatingContext
   });
@@ -1089,23 +1125,23 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   
   // Construct final prediction object with the main answer (YES/NO)
   const prediction = {
-    answer: correctedLlmResult.prediction, // Main answer: YES or NO
-    confidence: correctedLlmResult.confidence,
-    yes_probability: correctedLlmResult.yes_probability,
-    no_probability: correctedLlmResult.no_probability,
-    reason: correctedLlmResult.reason,
-    notes: correctedLlmResult.notes,
+    answer: realityAdjustedLlmResult.prediction, // Main answer: YES or NO
+    confidence: realityAdjustedLlmResult.confidence,
+    yes_probability: realityAdjustedLlmResult.yes_probability,
+    no_probability: realityAdjustedLlmResult.no_probability,
+    reason: realityAdjustedLlmResult.reason,
+    notes: realityAdjustedLlmResult.notes,
     marketClassification: gatingContext.marketClassification,
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
-    confidenceScore: correctedLlmResult.confidence,
+    confidenceScore: realityAdjustedLlmResult.confidence,
     differenceBetweenMarketProbabilityAndAI: qualityGates.differenceBetweenMarketProbabilityAndAI,
     mispricingScore: qualityGates.mispricingScore,
     mispricingDirection: qualityGates.mispricingDirection,
     expectedEdgeScore: qualityGates.expectedEdgeScore,
-    externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
-    mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
-    mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
+    externalDataAdjustment: realityAdjustedLlmResult.externalDataAdjustment,
+    mlCorrectionAdjustment: realityAdjustedLlmResult.mlCorrectionAdjustment,
+    mlCorrectionApplied: realityAdjustedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
     thresholdsUsed: qualityGates.thresholds,
     features,
@@ -1230,9 +1266,10 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
 
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
   const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
+  const realityAdjustedLlmResult = applyRealityPrior(correctedLlmResult, marketData);
 
   const qualityGates = enforcePredictionQualityGates({
-    llmResult: correctedLlmResult,
+    llmResult: realityAdjustedLlmResult,
     features,
     gatingContext
   });
@@ -1269,23 +1306,23 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   
   // Construct final unified prediction object
   const prediction = {
-    answer: correctedLlmResult.prediction, // Main answer: YES or NO
-    confidence: correctedLlmResult.confidence,
-    yes_probability: correctedLlmResult.yes_probability,
-    no_probability: correctedLlmResult.no_probability,
-    reason: correctedLlmResult.reason,
-    notes: correctedLlmResult.notes,
+    answer: realityAdjustedLlmResult.prediction, // Main answer: YES or NO
+    confidence: realityAdjustedLlmResult.confidence,
+    yes_probability: realityAdjustedLlmResult.yes_probability,
+    no_probability: realityAdjustedLlmResult.no_probability,
+    reason: realityAdjustedLlmResult.reason,
+    notes: realityAdjustedLlmResult.notes,
     marketClassification: gatingContext.marketClassification,
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
-    confidenceScore: correctedLlmResult.confidence,
+    confidenceScore: realityAdjustedLlmResult.confidence,
     differenceBetweenMarketProbabilityAndAI: qualityGates.differenceBetweenMarketProbabilityAndAI,
     mispricingScore: qualityGates.mispricingScore,
     mispricingDirection: qualityGates.mispricingDirection,
     expectedEdgeScore: qualityGates.expectedEdgeScore,
-    externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
-    mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
-    mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
+    externalDataAdjustment: realityAdjustedLlmResult.externalDataAdjustment,
+    mlCorrectionAdjustment: realityAdjustedLlmResult.mlCorrectionAdjustment,
+    mlCorrectionApplied: realityAdjustedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
     thresholdsUsed: qualityGates.thresholds,
     summary: marketSummary,

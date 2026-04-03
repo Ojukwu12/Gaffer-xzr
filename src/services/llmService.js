@@ -63,7 +63,11 @@ const reasonLooksGeneric = (reason = '', anchors = { tokens: [], entities: [] })
     'given the current trend',
     'insufficient data',
     'the model suggests',
-    'high uncertainty'
+    'high uncertainty',
+    'market currently prices',
+    'sentiment data reinforcing',
+    'prevailing market and sentiment indicators collectively lean',
+    'collectively lean towards'
   ];
 
   const hasGenericPhrase = genericPhrases.some((phrase) => normalized.includes(phrase));

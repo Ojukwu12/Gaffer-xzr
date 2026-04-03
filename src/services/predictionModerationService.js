@@ -115,6 +115,16 @@ const toAdminPredictionPayload = (record) => {
   };
 };
 
+const refreshReasonAfterManualProbabilityEdit = ({ existingReason = '', aiProbability, predictedAnswer }) => {
+  const cleanReason = String(existingReason || '')
+    .replace(/\s*Manual probability update:[^.]*(?:\.|$)/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const manualLine = `Manual probability update: AI YES is now ${Number(aiProbability).toFixed(2)}%, so the recommended side is ${predictedAnswer}.`;
+  return cleanReason ? `${cleanReason} ${manualLine}` : manualLine;
+};
+
 const resolveDisplayReason = (record) => {
   const baseStatement = formatProbabilityStatement(record.marketProbabilityAtTime, record.aiProbability);
   if (!record.reason) return baseStatement;
@@ -234,6 +244,12 @@ const editAiProbability = async ({ predictionId, aiProbability, editedBy }) => {
       Math.abs(record.marketProbabilityAtTime - normalized).toFixed(2)
     );
   }
+
+  record.reason = refreshReasonAfterManualProbabilityEdit({
+    existingReason: record.reason,
+    aiProbability: normalized,
+    predictedAnswer: record.predictedAnswer
+  });
 
   await record.save();
   return record;
