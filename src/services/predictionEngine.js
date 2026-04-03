@@ -390,43 +390,54 @@ const ensureMarketIsPredictable = ({ marketData, features }) => {
     marketClassification
   );
 
-  if (marketClassification === MARKET_CATEGORIES.UNPREDICTABLE) {
-    throw new CustomError(
-      'Market classified as unpredictable/noise and skipped for accuracy optimization',
-      422,
-      'MARKET_UNPREDICTABLE',
-      {
-        marketClassification,
-        marketPredictabilityScore,
-        signalStrengthScore,
-        marketBucket,
-        thresholds: dynamicThresholds
-      }
-    );
-  }
-
-  if (marketPredictabilityScore < dynamicThresholds.minPredictability) {
-    throw new CustomError(
-      `Market predictability score ${marketPredictabilityScore}% is below threshold ${dynamicThresholds.minPredictability}%`,
-      422,
-      'MARKET_UNPREDICTABLE',
-      {
-        marketClassification,
-        marketPredictabilityScore,
-        signalStrengthScore,
-        marketBucket,
-        thresholds: dynamicThresholds
-      }
-    );
-  }
-
-  return {
+  const result = {
     marketClassification,
     marketPredictabilityScore,
     signalStrengthScore,
     marketBucket,
-    thresholds: dynamicThresholds
+    thresholds: dynamicThresholds,
+    isPredictable: true,
+    dataIssue: null
   };
+
+  if (marketClassification === MARKET_CATEGORIES.UNPREDICTABLE) {
+    result.isPredictable = false;
+    result.dataIssue = {
+      type: 'MARKET_UNPREDICTABLE',
+      severity: 'info',
+      message: 'Market classified as unpredictable/noise and saved with caution',
+      details: {
+        marketClassification,
+        marketPredictabilityScore,
+        signalStrengthScore,
+        marketBucket,
+        thresholds: dynamicThresholds
+      }
+    };
+    logger.warn(`Market marked as unpredictable but still generating prediction for review`);
+    return result;
+  }
+
+  if (marketPredictabilityScore < dynamicThresholds.minPredictability) {
+    result.isPredictable = false;
+    result.dataIssue = {
+      type: 'LOW_PREDICTABILITY_SCORE',
+      severity: 'warning',
+      message: `Market predictability score ${marketPredictabilityScore}% is below threshold ${dynamicThresholds.minPredictability}%. Prediction generated for review.`,
+      details: {
+        marketClassification,
+        marketPredictabilityScore,
+        threshold: dynamicThresholds.minPredictability,
+        signalStrengthScore,
+        marketBucket,
+        thresholds: dynamicThresholds
+      }
+    };
+    logger.warn(`Low predictability score (${marketPredictabilityScore}%) but still generating prediction for review`);
+    return result;
+  }
+
+  return result;
 };
 
 const enforcePredictionQualityGates = ({ llmResult, features, gatingContext }) => {
@@ -436,17 +447,20 @@ const enforcePredictionQualityGates = ({ llmResult, features, gatingContext }) =
     minExpectedEdge: MIN_EXPECTED_EDGE_SCORE
   };
 
+  const dataIssues = [];
+
   if (llmResult.confidence < thresholds.minConfidence) {
-    throw new CustomError(
-      `Prediction confidence ${llmResult.confidence}% is below threshold ${thresholds.minConfidence}%`,
-      422,
-      'PREDICTION_FILTERED_OUT',
-      {
-        ...gatingContext,
+    dataIssues.push({
+      type: 'LOW_CONFIDENCE',
+      severity: 'warning',
+      message: `Prediction confidence ${llmResult.confidence}% is below ideal threshold ${thresholds.minConfidence}%. Prediction generated for review.`,
+      details: {
         confidenceScore: llmResult.confidence,
-        thresholds
+        threshold: thresholds.minConfidence,
+        shortfall: thresholds.minConfidence - llmResult.confidence
       }
-    );
+    });
+    logger.warn(`Low confidence (${llmResult.confidence}%) but still generating prediction for review`);
   }
 
   const marketProbability = Number(features.impliedProbability || 0);
@@ -454,17 +468,17 @@ const enforcePredictionQualityGates = ({ llmResult, features, gatingContext }) =
   const mispricing = computeMispricing(marketProbability, aiYesProbability);
 
   if (mispricing.differenceBetweenMarketProbabilityAndAI < thresholds.minProbabilityDiff) {
-    throw new CustomError(
-      `AI/market probability difference ${mispricing.differenceBetweenMarketProbabilityAndAI}% is below minimum ${thresholds.minProbabilityDiff}%`,
-      422,
-      'PREDICTION_FILTERED_OUT',
-      {
-        ...gatingContext,
-        confidenceScore: llmResult.confidence,
+    dataIssues.push({
+      type: 'SMALL_PROBABILITY_DIFF',
+      severity: 'info',
+      message: `AI/market probability difference ${mispricing.differenceBetweenMarketProbabilityAndAI}% is below minimum ${thresholds.minProbabilityDiff}%. Prediction is close to market but generated for review.`,
+      details: {
         ...mispricing,
-        thresholds
+        threshold: thresholds.minProbabilityDiff,
+        shortfall: thresholds.minProbabilityDiff - mispricing.differenceBetweenMarketProbabilityAndAI
       }
-    );
+    });
+    logger.info(`Small probability diff (${mispricing.differenceBetweenMarketProbabilityAndAI}%) but still generating prediction`);
   }
 
   const expectedEdgeScore = computeExpectedEdgeScore({
@@ -475,24 +489,26 @@ const enforcePredictionQualityGates = ({ llmResult, features, gatingContext }) =
   });
 
   if (expectedEdgeScore < thresholds.minExpectedEdge) {
-    throw new CustomError(
-      `Expected edge score ${expectedEdgeScore}% is below minimum ${thresholds.minExpectedEdge}%`,
-      422,
-      'PREDICTION_FILTERED_OUT',
-      {
-        ...gatingContext,
-        confidenceScore: llmResult.confidence,
-        ...mispricing,
+    dataIssues.push({
+      type: 'LOW_EXPECTED_EDGE',
+      severity: 'info',
+      message: `Expected edge score ${expectedEdgeScore}% is below minimum ${thresholds.minExpectedEdge}%. Small edge predicted but generated for review.`,
+      details: {
         expectedEdgeScore,
-        thresholds
+        threshold: thresholds.minExpectedEdge,
+        shortfall: thresholds.minExpectedEdge - expectedEdgeScore,
+        ...mispricing
       }
-    );
+    });
+    logger.info(`Low expected edge (${expectedEdgeScore}%) but still generating prediction`);
   }
 
   return {
     ...mispricing,
     expectedEdgeScore,
-    thresholds
+    thresholds,
+    dataIssues,
+    hasQualityIssues: dataIssues.length > 0
   };
 };
 
@@ -1035,11 +1051,33 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
   const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
 
-  const mispricing = enforcePredictionQualityGates({
+  const qualityGates = enforcePredictionQualityGates({
     llmResult: correctedLlmResult,
     features,
     gatingContext
   });
+
+  // Collect all data issues from both gates
+  const allDataIssues = [];
+  if (gatingContext.dataIssue) {
+    allDataIssues.push(gatingContext.dataIssue);
+  }
+  if (qualityGates.dataIssues && Array.isArray(qualityGates.dataIssues)) {
+    allDataIssues.push(...qualityGates.dataIssues);
+  }
+
+  // Build consolidated dataIssue object if issues exist
+  let consolidatedDataIssue = null;
+  if (allDataIssues.length > 0) {
+    consolidatedDataIssue = {
+      hasIssues: true,
+      count: allDataIssues.length,
+      issues: allDataIssues,
+      severity: allDataIssues.some(i => i.severity === 'warning') ? 'warning' : 'info',
+      message: 'Prediction generated with data quality issues. Review before approval.',
+      recordedAt: new Date().toISOString()
+    };
+  }
 
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, option);
@@ -1061,18 +1099,19 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
     confidenceScore: correctedLlmResult.confidence,
-    differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
-    mispricingScore: mispricing.mispricingScore,
-    mispricingDirection: mispricing.mispricingDirection,
-    expectedEdgeScore: mispricing.expectedEdgeScore,
+    differenceBetweenMarketProbabilityAndAI: qualityGates.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: qualityGates.mispricingScore,
+    mispricingDirection: qualityGates.mispricingDirection,
+    expectedEdgeScore: qualityGates.expectedEdgeScore,
     externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
     mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
     mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
-    thresholdsUsed: mispricing.thresholds,
+    thresholdsUsed: qualityGates.thresholds,
     features,
     summary: marketSummary,
-    polymarketUrl
+    polymarketUrl,
+    dataIssue: consolidatedDataIssue
   };
   
   const totalTime = Date.now() - overallStart;
@@ -1088,7 +1127,7 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     totalTime
   );
   
-  logger.info(`Prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+  logger.info(`Prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}${consolidatedDataIssue ? ', hasDataIssues: true' : ''}`);
 
   await predictionTrackingService.recordPrediction({
     marketId,
@@ -1113,7 +1152,8 @@ const generatePrediction = async (marketId, option, timeframe = 'daily') => {
     thresholdsUsed: prediction.thresholdsUsed,
     marketProbabilityAtTime: features.impliedProbability,
     aiProbability: prediction.yes_probability,
-    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability]
+    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability],
+    dataIssue: consolidatedDataIssue
   });
   
   return {
@@ -1191,11 +1231,33 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
   const calibratedLlmResult = calibrateWithExternalData(llmResult, features);
   const correctedLlmResult = applyMlCorrectionLayer(calibratedLlmResult, features, gatingContext);
 
-  const mispricing = enforcePredictionQualityGates({
+  const qualityGates = enforcePredictionQualityGates({
     llmResult: correctedLlmResult,
     features,
     gatingContext
   });
+
+  // Collect all data issues from both gates
+  const allDataIssues = [];
+  if (gatingContext.dataIssue) {
+    allDataIssues.push(gatingContext.dataIssue);
+  }
+  if (qualityGates.dataIssues && Array.isArray(qualityGates.dataIssues)) {
+    allDataIssues.push(...qualityGates.dataIssues);
+  }
+
+  // Build consolidated dataIssue object if issues exist
+  let consolidatedDataIssue = null;
+  if (allDataIssues.length > 0) {
+    consolidatedDataIssue = {
+      hasIssues: true,
+      count: allDataIssues.length,
+      issues: allDataIssues,
+      severity: allDataIssues.some(i => i.severity === 'warning') ? 'warning' : 'info',
+      message: 'Prediction generated with data quality issues. Review before approval.',
+      recordedAt: new Date().toISOString()
+    };
+  }
 
   // Generate market summary
   const marketSummary = generateMarketSummary(features, marketData, representativeOption);
@@ -1217,22 +1279,23 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     marketPredictabilityScore: gatingContext.marketPredictabilityScore,
     signalStrengthScore: gatingContext.signalStrengthScore,
     confidenceScore: correctedLlmResult.confidence,
-    differenceBetweenMarketProbabilityAndAI: mispricing.differenceBetweenMarketProbabilityAndAI,
-    mispricingScore: mispricing.mispricingScore,
-    mispricingDirection: mispricing.mispricingDirection,
-    expectedEdgeScore: mispricing.expectedEdgeScore,
+    differenceBetweenMarketProbabilityAndAI: qualityGates.differenceBetweenMarketProbabilityAndAI,
+    mispricingScore: qualityGates.mispricingScore,
+    mispricingDirection: qualityGates.mispricingDirection,
+    expectedEdgeScore: qualityGates.expectedEdgeScore,
     externalDataAdjustment: correctedLlmResult.externalDataAdjustment,
     mlCorrectionAdjustment: correctedLlmResult.mlCorrectionAdjustment,
     mlCorrectionApplied: correctedLlmResult.mlCorrectionApplied,
     marketBucket: gatingContext.marketBucket,
-    thresholdsUsed: mispricing.thresholds,
+    thresholdsUsed: qualityGates.thresholds,
     summary: marketSummary,
-    polymarketUrl
+    polymarketUrl,
+    dataIssue: consolidatedDataIssue
   };
   
   const totalTime = Date.now() - overallStart;
   
-  logger.info(`Unified prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}`);
+  logger.info(`Unified prediction generated in ${totalTime}ms, answer: ${prediction.answer}, confidence: ${prediction.confidence}%, quality: ${marketSummary.marketHealth.grade}${consolidatedDataIssue ? ', hasDataIssues: true' : ''}`);
 
   await predictionTrackingService.recordPrediction({
     marketId,
@@ -1257,7 +1320,8 @@ const generateUnifiedPrediction = async (marketId, timeframe = 'daily') => {
     thresholdsUsed: prediction.thresholdsUsed,
     marketProbabilityAtTime: features.impliedProbability,
     aiProbability: prediction.yes_probability,
-    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability]
+    aiProbabilityHistory: [calibratedLlmResult.yes_probability, prediction.yes_probability],
+    dataIssue: consolidatedDataIssue
   });
   
   return {

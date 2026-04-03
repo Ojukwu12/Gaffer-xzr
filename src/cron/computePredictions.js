@@ -47,6 +47,61 @@ const normalizePredictionAnswerFromOption = (option = '') => {
 };
 
 /**
+ * Determines if a market should be repredicted based on market changes
+ * Compares current market data with the most recent prediction to detect significant changes
+ * @param {Object} marketData - Current market data
+ * @param {Object} previousPrediction - Most recent prediction record
+ * @returns {Object} Decision object with shouldRepredicting and changeDetails
+ */
+const shouldRepredictMarket = (marketData, previousPrediction) => {
+  if (!previousPrediction) {
+    return { shouldRepredicting: true, reason: 'no_previous_prediction' };
+  }
+
+  // Normalize both prices to percentage (0-100 scale)
+  const currentPricePercent = ((marketData.currentPrice || marketData.yesPrice || 0.5) * 100);
+  const previousPricePercent = previousPrediction.marketProbabilityAtTime || 50;
+  const priceChange = Math.abs(currentPricePercent - previousPricePercent);
+
+  // Threshold: 5% price movement triggers reprediction
+  const PRICE_CHANGE_THRESHOLD = 5;
+  if (priceChange > PRICE_CHANGE_THRESHOLD) {
+    return {
+      shouldRepredicting: true,
+      reason: 'significant_price_change',
+      details: {
+        previousPrice: previousPricePercent.toFixed(2),
+        currentPrice: currentPricePercent.toFixed(2),
+        changePercentage: priceChange.toFixed(2)
+      }
+    };
+  }
+
+  const hoursSincePrediction = (Date.now() - new Date(previousPrediction.predictedAt).getTime()) / (1000 * 60 * 60);
+  
+  // Repredicting after 24 hours even if no major changes (keeps predictions fresh)
+  const HOURS_UNTIL_REFRESH = 24;
+  if (hoursSincePrediction > HOURS_UNTIL_REFRESH) {
+    return {
+      shouldRepredicting: true,
+      reason: 'prediction_age_refresh',
+      details: {
+        hoursSincePrediction: hoursSincePrediction.toFixed(1)
+      }
+    };
+  }
+
+  return {
+    shouldRepredicting: false,
+    reason: 'market_unchanged',
+    details: {
+      priceChange: priceChange.toFixed(2),
+      hoursSincePrediction: hoursSincePrediction.toFixed(1)
+    }
+  };
+};
+
+/**
  * Main computation function
  */
 const computePredictions = async (options = {}) => {
@@ -199,6 +254,23 @@ const computePredictions = async (options = {}) => {
         const parsedMarket = polymarketService.parseMarket(market);
         const options = parsedMarket.options || ['Yes', 'No'];
         
+        // Check if market should be repredicted based on changes
+        const mostRecentPrediction = await PredictionRecord.findOne(
+          { marketId: parsedMarket.marketId },
+          null,
+          { sort: { predictedAt: -1 } }
+        );
+
+        const repredictionDecision = shouldRepredictMarket(parsedMarket, mostRecentPrediction);
+        
+        if (!repredictionDecision.shouldRepredicting) {
+          logger.debug(
+            `Skipping reprediction for ${parsedMarket.marketId}: ${repredictionDecision.reason}. ` +
+            `Details: ${JSON.stringify(repredictionDecision.details)}`
+          );
+          continue;
+        }
+        
         // Generate prediction for first option (daily timeframe only to reduce API load)
         for (const timeframe of ['daily']) {
           try {
@@ -209,75 +281,22 @@ const computePredictions = async (options = {}) => {
             );
             
             successCount++;
-            logger.info(
-              `Prediction computed: ${parsedMarket.marketId} (${timeframe}) - ${prediction.confidence}%`
-            );
+            
+            // Log the prediction generation
+            if (prediction.dataIssue) {
+              logger.info(
+                `Prediction computed with ${prediction.dataIssue.count} data issue(s): ${parsedMarket.marketId} (${timeframe}) - ${prediction.confidence}% - Issues: ${prediction.dataIssue.issues.map(i => i.type).join(', ')}`
+              );
+            } else {
+              logger.info(
+                `Prediction computed: ${parsedMarket.marketId} (${timeframe}) - ${prediction.confidence}%`
+              );
+            }
             
             // Add small delay to avoid rate limits
             await new Promise(resolve => setTimeout(resolve, 100));
             
           } catch (predError) {
-            if (predError.errorCode === 'MARKET_UNPREDICTABLE' || predError.errorCode === 'PREDICTION_FILTERED_OUT') {
-              const issueCode = predError.errorCode;
-              const reasonKey = predError.errorCode === 'MARKET_UNPREDICTABLE' ? 'unpredictable_market' : 'quality_gate_filtered';
-              skippedReasons[reasonKey] = (skippedReasons[reasonKey] || 0) + 1;
-
-              const issueDetails = predError.details || {};
-              const polymarketUrl = parsedMarket.polymarketUrl || polymarketService.getMarketUrl({
-                marketId: parsedMarket.marketId,
-                slug: parsedMarket.slug || null,
-                eventSlug: parsedMarket.eventSlug || null
-              });
-
-              const impliedProbability = Number(parsedMarket.yesPrice ?? parsedMarket.currentPrice ?? 50);
-              const normalizedImpliedProbability = Number.isFinite(impliedProbability)
-                ? Math.max(0, Math.min(100, impliedProbability))
-                : null;
-
-              const placeholderConfidence = Number(issueDetails.confidenceScore);
-              const predictionConfidence = Number.isFinite(placeholderConfidence)
-                ? Math.max(0, Math.min(100, placeholderConfidence))
-                : 0;
-
-              await predictionTrackingService.recordPrediction({
-                marketId: parsedMarket.marketId,
-                marketTitle: parsedMarket.title,
-                marketSlug: parsedMarket.slug || null,
-                polymarketUrl,
-                option: options[0],
-                timeframe,
-                predictionType: 'option',
-                status: 'pending',
-                evaluationMode: config.predictionMode,
-                predictedAnswer: normalizePredictionAnswerFromOption(options[0]),
-                confidence: predictionConfidence,
-                marketProbabilityAtTime: normalizedImpliedProbability,
-                aiProbability: null,
-                marketClassification: issueDetails.marketClassification || null,
-                marketPredictabilityScore: issueDetails.marketPredictabilityScore ?? null,
-                signalStrengthScore: issueDetails.signalStrengthScore ?? null,
-                differenceBetweenMarketProbabilityAndAI: issueDetails.differenceBetweenMarketProbabilityAndAI ?? null,
-                mispricingScore: issueDetails.mispricingScore ?? null,
-                mispricingDirection: issueDetails.mispricingDirection || 'unknown',
-                expectedEdgeScore: issueDetails.expectedEdgeScore ?? null,
-                marketBucket: issueDetails.marketBucket || null,
-                thresholdsUsed: issueDetails.thresholds || null,
-                reason: `Data issue: ${predError.message}`,
-                dataIssue: {
-                  code: issueCode,
-                  note: predError.message,
-                  details: issueDetails
-                }
-              });
-
-              successCount++;
-              logger.info(
-                `Prediction queued with dataIssue for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`,
-                predError.details || {}
-              );
-              continue;
-            }
-
             logger.error(
               `Failed to compute prediction for ${parsedMarket.marketId} (${timeframe}): ${predError.message}`
             );
